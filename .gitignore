@@ -1,0 +1,35 @@
+# Build directories and outputs
+build/
+build_release/
+build_asan/
+build_scalar/
+bin/
+*.o
+*.a
+*.so
+*.dylib
+
+# Test binaries & benchmarks
+benchmark_vector_paths
+benchmark_hqrn
+test_cpu_dispatch
+test_cpu_dispatch_asan
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.pytest_cache/
+
+# Diagnostics and temporary logs
+sanitizer_diagnostics/
+test_bad_attempt_diag/
+test_bad_event_diag/
+test_bad_ref_diag/
+*.log
+sed*
+
+# OS / Editor artifacts
+.DS_Store
+.vscode/
+.idea/

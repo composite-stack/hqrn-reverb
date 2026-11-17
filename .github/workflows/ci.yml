@@ -1,0 +1,796 @@
+name: HQRN Audio DSP CI (x86_64 AVX2/FMA & ARM64 NEON with ASan/UBSan & Failure Diagnostics)
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master, develop ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ===========================================================================
+  # 1. Native x86_64 Runner: AVX2 + FMA & Graceful Fallback
+  # ===========================================================================
+  x86_64-avx2-fma:
+    name: x86_64 (${{ matrix.compiler }}) - Native AVX2 & Sanitizers
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++-13, g++-14, clang++-17, clang++-18]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Initialize Diagnostic Metadata
+        id: meta
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_NUMBER: ${{ github.run_number }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          JOB_NAME: ${{ github.job }}
+          COMPILER_ID: ${{ matrix.compiler }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+          GIT_REF: ${{ github.ref }}
+          GIT_REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          mkdir -p sanitizer_diagnostics
+          TIMESTAMP_ISO=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          TIMESTAMP_TAG=$(date -u +"%Y%m%dT%H%M%SZ")
+          SHORT_SHA=$(echo "${COMMIT_SHA}" | cut -c1-7)
+          EPOCH=$(date +%s)
+          REF_SLUG=$(echo "${GIT_REF_NAME}" | tr '/' '-' | tr -cd '[:alnum:]-_.' | cut -c1-24)
+          EVENT_SLUG=$(echo "${EVENT_NAME}" | tr -cd '[:alnum:]-_' | cut -c1-15)
+          IS_RERUN=$([ "${RUN_ATTEMPT}" -gt 1 ] && echo "true" || echo "false")
+          ARTIFACT_NAME="asan-ubsan-failure-${JOB_NAME}-${COMPILER_ID}-run${RUN_ID}-att${RUN_ATTEMPT}-${EVENT_SLUG}-${REF_SLUG}-sha${SHORT_SHA}-${TIMESTAMP_TAG}"
+
+          echo "timestamp_iso=${TIMESTAMP_ISO}" >> $GITHUB_OUTPUT
+          echo "timestamp_tag=${TIMESTAMP_TAG}" >> $GITHUB_OUTPUT
+          echo "commit_sha=${COMMIT_SHA}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "run_id=${RUN_ID}" >> $GITHUB_OUTPUT
+          echo "run_number=${RUN_NUMBER}" >> $GITHUB_OUTPUT
+          echo "run_attempt=${RUN_ATTEMPT}" >> $GITHUB_OUTPUT
+          echo "job_name=${JOB_NAME}" >> $GITHUB_OUTPUT
+          echo "event_name=${EVENT_NAME}" >> $GITHUB_OUTPUT
+          echo "git_ref=${GIT_REF}" >> $GITHUB_OUTPUT
+          echo "git_ref_name=${GIT_REF_NAME}" >> $GITHUB_OUTPUT
+          echo "artifact_name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+
+          # 1. Human-readable diagnostic metadata
+          {
+            echo "================================================================================"
+            echo "HQRN CI SANITIZER FAILURE DIAGNOSTIC METADATA"
+            echo "================================================================================"
+            echo "Commit SHA:             ${COMMIT_SHA}"
+            echo "Short SHA:              ${SHORT_SHA}"
+            echo "Workflow Run ID:        ${RUN_ID}"
+            echo "Workflow Run Number:    ${RUN_NUMBER}"
+            echo "Workflow Run Attempt:   ${RUN_ATTEMPT} (Wiederholung: ${IS_RERUN})"
+            echo "Trigger Event:          ${EVENT_NAME}"
+            echo "Git Ref:                ${GIT_REF}"
+            echo "Git Ref Name:           ${GIT_REF_NAME}"
+            echo "Job Name:               ${JOB_NAME}"
+            echo "Target Matrix Compiler: ${COMPILER_ID}"
+            echo "Workflow Name:          ${WORKFLOW_NAME}"
+            echo "Triggered By (Actor):   ${ACTOR}"
+            echo "Timestamp (UTC):        ${TIMESTAMP_ISO}"
+            echo "Timestamp (Epoch):      ${EPOCH}"
+            echo "Diagnostic Package:     ${ARTIFACT_NAME}"
+            echo "================================================================================"
+          } > sanitizer_diagnostics/diagnostic_metadata.txt
+
+          # 2. Machine-readable JSON metadata
+          cat <<EOF > sanitizer_diagnostics/metadata.json
+          {
+            "commit_sha": "${COMMIT_SHA}",
+            "short_sha": "${SHORT_SHA}",
+            "workflow_run_id": "${RUN_ID}",
+            "workflow_run_number": "${RUN_NUMBER}",
+            "workflow_run_attempt": ${RUN_ATTEMPT},
+            "is_rerun": ${IS_RERUN},
+            "trigger_event": "${EVENT_NAME}",
+            "git_ref": "${GIT_REF}",
+            "git_ref_name": "${GIT_REF_NAME}",
+            "job_name": "${JOB_NAME}",
+            "matrix_compiler": "${COMPILER_ID}",
+            "workflow": "${WORKFLOW_NAME}",
+            "actor": "${ACTOR}",
+            "timestamp_utc": "${TIMESTAMP_ISO}",
+            "timestamp_epoch": ${EPOCH},
+            "artifact_name": "${ARTIFACT_NAME}"
+          }
+          EOF
+
+          # 3. Formatted Step Summary markdown template
+          cat <<EOF > sanitizer_diagnostics/step_summary.md
+          ### ⚠️ Sanitizer-Lauf Fehlgeschlagen: Diagnose-Übersicht
+          | Parameter | Wert |
+          |---|---|
+          | **Commit-SHA** | `${COMMIT_SHA}` (`${SHORT_SHA}`) |
+          | **Workflow Run ID** | [${RUN_ID}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${RUN_ID}) (Run #${RUN_NUMBER}) |
+          | **Run Attempt (Wiederholung)** | **Versuch #${RUN_ATTEMPT}** |
+          | **Trigger-Event** | `${EVENT_NAME}` |
+          | **Git-Ref** | `${GIT_REF}` (`${GIT_REF_NAME}`) |
+          | **Jobname** | `${JOB_NAME}` |
+          | **Compiler / Ziel** | `${COMPILER_ID}` (x86_64 AVX2/FMA) |
+          | **Zeitpunkt (UTC)** | `${TIMESTAMP_ISO}` |
+          | **Artefakt-Paket** | `${ARTIFACT_NAME}` |
+
+          Die vollständigen Diagnose-Logs (Kompilierung, SIMD-, Skalar- und CTest-Logs samt CPU- und Compiler-Metadaten) wurden als Artefakt hochgeladen.
+          EOF
+
+      - name: Validate Diagnostic Metadata Consistency
+        env:
+          DIAGNOSTICS_DIR: sanitizer_diagnostics
+          EXP_RUN_ATTEMPT: ${{ github.run_attempt }}
+          EXP_TRIGGER_EVENT: ${{ github.event_name }}
+          EXP_GIT_REF: ${{ github.ref }}
+          EXP_GIT_REF_NAME: ${{ github.ref_name }}
+        run: |
+          python3 scripts/verify_diagnostic_metadata.py
+
+      - name: Verify Native CPU Features (AVX2 & FMA)
+        run: |
+          echo "=== CPU Hardware Info ==="
+          lscpu | grep -E "Model name|Flags" || cat /proc/cpuinfo | grep -E "model name|flags" | head -n 2
+          echo "=== Checking AVX2 and FMA Support ==="
+          if grep -q "avx2" /proc/cpuinfo && grep -q "fma" /proc/cpuinfo; then
+            echo "SUCCESS: Host CPU supports native AVX2 and FMA."
+          else
+            echo "ERROR: Runner CPU lacks AVX2 or FMA flags!"
+            exit 1
+          fi
+
+      - name: Install Compiler & Build Tools
+        run: |
+          sudo apt-get update -qq
+          PKG=$(echo "${{ matrix.compiler }}" | sed 's/++//')
+          sudo apt-get install -y -qq "$PKG" "${{ matrix.compiler }}" cmake ninja-build 2>/dev/null || sudo apt-get install -y -qq "$PKG" cmake ninja-build || sudo apt-get install -y -qq cmake ninja-build || true
+
+      - name: Build & Run Native Release Targets (SIMD AVX2 & Skalar)
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: |
+          mkdir -p build_release
+          cmake -B build_release -DCMAKE_BUILD_TYPE=Release -G Ninja
+          cmake --build build_release
+          ctest --test-dir build_release --output-on-failure
+
+      - name: Record Diagnostic Environment & Compiler Metadata
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: |
+          {
+            echo "=== RUNNER SYSTEM & ARCHITECTURE ==="
+            uname -a
+            echo "Architecture: $(uname -m)"
+            cat /etc/os-release 2>/dev/null || true
+            echo "=== CPU HARDWARE SPECIFICATION ==="
+            lscpu 2>/dev/null || cat /proc/cpuinfo
+          } > sanitizer_diagnostics/runner_arch_info.txt
+
+          {
+            echo "=== COMPILER METADATA ==="
+            which "${CXX}" || true
+            "${CXX}" --version
+          } > sanitizer_diagnostics/compiler_version.txt
+
+      - name: Build & Run ASan + UBSan Sanitizer Targets (SIMD AVX2 & Skalar)
+        env:
+          CXX: ${{ matrix.compiler }}
+          ASAN_OPTIONS: "halt_on_error=1:abort_on_error=1:detect_leaks=1"
+          UBSAN_OPTIONS: "halt_on_error=1:abort_on_error=1:print_stacktrace=1"
+        shell: bash
+        run: |
+          set -e
+          set -o pipefail
+
+          echo "=== Configuring Sanitizer Build ==="
+          cmake -B build_sanitizer -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON -G Ninja 2>&1 | tee sanitizer_diagnostics/build_configure_sanitizer.log
+
+          echo "=== Compiling Sanitizer Targets ==="
+          cmake --build build_sanitizer 2>&1 | tee sanitizer_diagnostics/build_compile_sanitizer.log
+
+          echo "=== Executing SIMD AVX2 Dispatch Test with ASan & UBSan ==="
+          ./build_sanitizer/test_cpu_dispatch 2>&1 | tee sanitizer_diagnostics/asan_ubsan_simd_dispatch.log
+
+          echo "=== Executing Skalar Fallback Test with ASan & UBSan ==="
+          ./build_sanitizer/test_cpu_dispatch_scalar 2>&1 | tee sanitizer_diagnostics/asan_ubsan_scalar_dispatch.log
+
+          echo "=== CTest Sanitizer Verification ==="
+          ctest --test-dir build_sanitizer --output-on-failure 2>&1 | tee sanitizer_diagnostics/ctest_sanitizer.log
+
+      - name: Summarize Sanitizer Failure in Workflow Run
+        if: failure()
+        run: |
+          if [ -n "$GITHUB_STEP_SUMMARY" ] && [ -f "sanitizer_diagnostics/step_summary.md" ]; then
+            cat sanitizer_diagnostics/step_summary.md >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload Sanitizer Failure Diagnostic Artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact_name || format('asan-ubsan-failure-{0}-{1}-run{2}-att{3}-{4}', github.job, matrix.compiler, github.run_id, github.run_attempt, github.sha) }}
+          path: sanitizer_diagnostics/
+          retention-days: 14
+          if-no-files-found: warn
+
+  # ===========================================================================
+  # 2. Native Linux ARM64 Runner: Ubuntu 24.04 ARM (Native NEON)
+  # ===========================================================================
+  arm64-neon-linux:
+    name: Linux ARM64 (${{ matrix.compiler }}) - Native NEON & Sanitizers
+    runs-on: ubuntu-24.04-arm
+    strategy:
+      fail-fast: false
+      matrix:
+        compiler: [g++-13, clang++-18]
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Initialize Diagnostic Metadata
+        id: meta
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_NUMBER: ${{ github.run_number }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          JOB_NAME: ${{ github.job }}
+          COMPILER_ID: ${{ matrix.compiler }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+          GIT_REF: ${{ github.ref }}
+          GIT_REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          mkdir -p sanitizer_diagnostics
+          TIMESTAMP_ISO=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          TIMESTAMP_TAG=$(date -u +"%Y%m%dT%H%M%SZ")
+          SHORT_SHA=$(echo "${COMMIT_SHA}" | cut -c1-7)
+          EPOCH=$(date +%s)
+          REF_SLUG=$(echo "${GIT_REF_NAME}" | tr '/' '-' | tr -cd '[:alnum:]-_.' | cut -c1-24)
+          EVENT_SLUG=$(echo "${EVENT_NAME}" | tr -cd '[:alnum:]-_' | cut -c1-15)
+          IS_RERUN=$([ "${RUN_ATTEMPT}" -gt 1 ] && echo "true" || echo "false")
+          ARTIFACT_NAME="asan-ubsan-failure-${JOB_NAME}-${COMPILER_ID}-run${RUN_ID}-att${RUN_ATTEMPT}-${EVENT_SLUG}-${REF_SLUG}-sha${SHORT_SHA}-${TIMESTAMP_TAG}"
+
+          echo "timestamp_iso=${TIMESTAMP_ISO}" >> $GITHUB_OUTPUT
+          echo "timestamp_tag=${TIMESTAMP_TAG}" >> $GITHUB_OUTPUT
+          echo "commit_sha=${COMMIT_SHA}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "run_id=${RUN_ID}" >> $GITHUB_OUTPUT
+          echo "run_number=${RUN_NUMBER}" >> $GITHUB_OUTPUT
+          echo "run_attempt=${RUN_ATTEMPT}" >> $GITHUB_OUTPUT
+          echo "job_name=${JOB_NAME}" >> $GITHUB_OUTPUT
+          echo "event_name=${EVENT_NAME}" >> $GITHUB_OUTPUT
+          echo "git_ref=${GIT_REF}" >> $GITHUB_OUTPUT
+          echo "git_ref_name=${GIT_REF_NAME}" >> $GITHUB_OUTPUT
+          echo "artifact_name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+
+          # 1. Human-readable diagnostic metadata
+          {
+            echo "================================================================================"
+            echo "HQRN CI SANITIZER FAILURE DIAGNOSTIC METADATA"
+            echo "================================================================================"
+            echo "Commit SHA:             ${COMMIT_SHA}"
+            echo "Short SHA:              ${SHORT_SHA}"
+            echo "Workflow Run ID:        ${RUN_ID}"
+            echo "Workflow Run Number:    ${RUN_NUMBER}"
+            echo "Workflow Run Attempt:   ${RUN_ATTEMPT} (Wiederholung: ${IS_RERUN})"
+            echo "Trigger Event:          ${EVENT_NAME}"
+            echo "Git Ref:                ${GIT_REF}"
+            echo "Git Ref Name:           ${GIT_REF_NAME}"
+            echo "Job Name:               ${JOB_NAME}"
+            echo "Target Matrix Compiler: ${COMPILER_ID}"
+            echo "Workflow Name:          ${WORKFLOW_NAME}"
+            echo "Triggered By (Actor):   ${ACTOR}"
+            echo "Timestamp (UTC):        ${TIMESTAMP_ISO}"
+            echo "Timestamp (Epoch):      ${EPOCH}"
+            echo "Diagnostic Package:     ${ARTIFACT_NAME}"
+            echo "================================================================================"
+          } > sanitizer_diagnostics/diagnostic_metadata.txt
+
+          # 2. Machine-readable JSON metadata
+          cat <<EOF > sanitizer_diagnostics/metadata.json
+          {
+            "commit_sha": "${COMMIT_SHA}",
+            "short_sha": "${SHORT_SHA}",
+            "workflow_run_id": "${RUN_ID}",
+            "workflow_run_number": "${RUN_NUMBER}",
+            "workflow_run_attempt": ${RUN_ATTEMPT},
+            "is_rerun": ${IS_RERUN},
+            "trigger_event": "${EVENT_NAME}",
+            "git_ref": "${GIT_REF}",
+            "git_ref_name": "${GIT_REF_NAME}",
+            "job_name": "${JOB_NAME}",
+            "matrix_compiler": "${COMPILER_ID}",
+            "workflow": "${WORKFLOW_NAME}",
+            "actor": "${ACTOR}",
+            "timestamp_utc": "${TIMESTAMP_ISO}",
+            "timestamp_epoch": ${EPOCH},
+            "artifact_name": "${ARTIFACT_NAME}"
+          }
+          EOF
+
+          # 3. Formatted Step Summary markdown template
+          cat <<EOF > sanitizer_diagnostics/step_summary.md
+          ### ⚠️ Sanitizer-Lauf Fehlgeschlagen: Diagnose-Übersicht
+          | Parameter | Wert |
+          |---|---|
+          | **Commit-SHA** | `${COMMIT_SHA}` (`${SHORT_SHA}`) |
+          | **Workflow Run ID** | [${RUN_ID}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${RUN_ID}) (Run #${RUN_NUMBER}) |
+          | **Run Attempt (Wiederholung)** | **Versuch #${RUN_ATTEMPT}** |
+          | **Trigger-Event** | `${EVENT_NAME}` |
+          | **Git-Ref** | `${GIT_REF}` (`${GIT_REF_NAME}`) |
+          | **Jobname** | `${JOB_NAME}` |
+          | **Compiler / Ziel** | `${COMPILER_ID}` (Linux ARM64 NEON) |
+          | **Zeitpunkt (UTC)** | `${TIMESTAMP_ISO}` |
+          | **Artefakt-Paket** | `${ARTIFACT_NAME}` |
+
+          Die vollständigen Diagnose-Logs (Kompilierung, SIMD-, Skalar- und CTest-Logs samt CPU- und Compiler-Metadaten) wurden als Artefakt hochgeladen.
+          EOF
+
+      - name: Validate Diagnostic Metadata Consistency
+        env:
+          DIAGNOSTICS_DIR: sanitizer_diagnostics
+          EXP_RUN_ATTEMPT: ${{ github.run_attempt }}
+          EXP_TRIGGER_EVENT: ${{ github.event_name }}
+          EXP_GIT_REF: ${{ github.ref }}
+          EXP_GIT_REF_NAME: ${{ github.ref_name }}
+        run: |
+          python3 scripts/verify_diagnostic_metadata.py
+
+      - name: Verify Native ARM64 & NEON Architecture
+        run: |
+          echo "=== Architecture ==="
+          uname -m
+          if [ "$(uname -m)" != "aarch64" ]; then
+            echo "ERROR: Expected aarch64 runner but got $(uname -m)"
+            exit 1
+          fi
+          echo "=== CPU Features ==="
+          lscpu | grep -E "Architecture|Model name|Flags" || cat /proc/cpuinfo | head -n 15
+          if grep -E -q "asimd|neon" /proc/cpuinfo; then
+            echo "SUCCESS: Native ARM NEON (ASIMD) detected."
+          else
+            echo "ERROR: ASIMD/NEON not reported in /proc/cpuinfo"
+            exit 1
+          fi
+
+      - name: Install Compiler & Build Tools
+        run: |
+          sudo apt-get update -qq
+          PKG=$(echo "${{ matrix.compiler }}" | sed 's/++//')
+          sudo apt-get install -y -qq "$PKG" "${{ matrix.compiler }}" cmake ninja-build 2>/dev/null || sudo apt-get install -y -qq "$PKG" cmake ninja-build || sudo apt-get install -y -qq cmake ninja-build || true
+
+      - name: Build & Run Native Release Targets (SIMD NEON & Skalar)
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: |
+          mkdir -p build_release
+          cmake -B build_release -DCMAKE_BUILD_TYPE=Release -G Ninja
+          cmake --build build_release
+          ctest --test-dir build_release --output-on-failure
+
+      - name: Record Diagnostic Environment & Compiler Metadata
+        env:
+          CXX: ${{ matrix.compiler }}
+        run: |
+          {
+            echo "=== RUNNER SYSTEM & ARCHITECTURE ==="
+            uname -a
+            echo "Architecture: $(uname -m)"
+            cat /etc/os-release 2>/dev/null || true
+            echo "=== CPU HARDWARE SPECIFICATION ==="
+            lscpu 2>/dev/null || cat /proc/cpuinfo
+          } > sanitizer_diagnostics/runner_arch_info.txt
+
+          {
+            echo "=== COMPILER METADATA ==="
+            which "${CXX}" || true
+            "${CXX}" --version
+          } > sanitizer_diagnostics/compiler_version.txt
+
+      - name: Build & Run ASan + UBSan Sanitizer Targets (SIMD NEON & Skalar)
+        env:
+          CXX: ${{ matrix.compiler }}
+          ASAN_OPTIONS: "halt_on_error=1:abort_on_error=1:detect_leaks=1"
+          UBSAN_OPTIONS: "halt_on_error=1:abort_on_error=1:print_stacktrace=1"
+        shell: bash
+        run: |
+          set -e
+          set -o pipefail
+
+          echo "=== Configuring Sanitizer Build ==="
+          cmake -B build_sanitizer -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON -G Ninja 2>&1 | tee sanitizer_diagnostics/build_configure_sanitizer.log
+
+          echo "=== Compiling Sanitizer Targets ==="
+          cmake --build build_sanitizer 2>&1 | tee sanitizer_diagnostics/build_compile_sanitizer.log
+
+          echo "=== Executing SIMD NEON Dispatch Test with ASan & UBSan ==="
+          ./build_sanitizer/test_cpu_dispatch 2>&1 | tee sanitizer_diagnostics/asan_ubsan_simd_dispatch.log
+
+          echo "=== Executing Skalar Fallback Test with ASan & UBSan ==="
+          ./build_sanitizer/test_cpu_dispatch_scalar 2>&1 | tee sanitizer_diagnostics/asan_ubsan_scalar_dispatch.log
+
+          echo "=== CTest Sanitizer Verification ==="
+          ctest --test-dir build_sanitizer --output-on-failure 2>&1 | tee sanitizer_diagnostics/ctest_sanitizer.log
+
+      - name: Summarize Sanitizer Failure in Workflow Run
+        if: failure()
+        run: |
+          if [ -n "$GITHUB_STEP_SUMMARY" ] && [ -f "sanitizer_diagnostics/step_summary.md" ]; then
+            cat sanitizer_diagnostics/step_summary.md >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload Sanitizer Failure Diagnostic Artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact_name || format('asan-ubsan-failure-{0}-{1}-run{2}-att{3}-{4}', github.job, matrix.compiler, github.run_id, github.run_attempt, github.sha) }}
+          path: sanitizer_diagnostics/
+          retention-days: 14
+          if-no-files-found: warn
+
+  # ===========================================================================
+  # 3. Native macOS Apple Silicon Runner: macOS 14 / ARM64 (Native NEON)
+  # ===========================================================================
+  arm64-neon-macos:
+    name: macOS ARM64 (Apple Clang) - Native Apple Silicon & Sanitizers
+    runs-on: macos-14
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Initialize Diagnostic Metadata
+        id: meta
+        env:
+          COMMIT_SHA: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_NUMBER: ${{ github.run_number }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          JOB_NAME: ${{ github.job }}
+          COMPILER_ID: apple-clang
+          WORKFLOW_NAME: ${{ github.workflow }}
+          GIT_REF: ${{ github.ref }}
+          GIT_REF_NAME: ${{ github.ref_name }}
+          EVENT_NAME: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+        run: |
+          mkdir -p sanitizer_diagnostics
+          TIMESTAMP_ISO=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          TIMESTAMP_TAG=$(date -u +"%Y%m%dT%H%M%SZ")
+          SHORT_SHA=$(echo "${COMMIT_SHA}" | cut -c1-7)
+          EPOCH=$(date +%s)
+          REF_SLUG=$(echo "${GIT_REF_NAME}" | tr '/' '-' | tr -cd '[:alnum:]-_.' | cut -c1-24)
+          EVENT_SLUG=$(echo "${EVENT_NAME}" | tr -cd '[:alnum:]-_' | cut -c1-15)
+          IS_RERUN=$([ "${RUN_ATTEMPT}" -gt 1 ] && echo "true" || echo "false")
+          ARTIFACT_NAME="asan-ubsan-failure-${JOB_NAME}-${COMPILER_ID}-run${RUN_ID}-att${RUN_ATTEMPT}-${EVENT_SLUG}-${REF_SLUG}-sha${SHORT_SHA}-${TIMESTAMP_TAG}"
+
+          echo "timestamp_iso=${TIMESTAMP_ISO}" >> $GITHUB_OUTPUT
+          echo "timestamp_tag=${TIMESTAMP_TAG}" >> $GITHUB_OUTPUT
+          echo "commit_sha=${COMMIT_SHA}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "run_id=${RUN_ID}" >> $GITHUB_OUTPUT
+          echo "run_number=${RUN_NUMBER}" >> $GITHUB_OUTPUT
+          echo "run_attempt=${RUN_ATTEMPT}" >> $GITHUB_OUTPUT
+          echo "job_name=${JOB_NAME}" >> $GITHUB_OUTPUT
+          echo "event_name=${EVENT_NAME}" >> $GITHUB_OUTPUT
+          echo "git_ref=${GIT_REF}" >> $GITHUB_OUTPUT
+          echo "git_ref_name=${GIT_REF_NAME}" >> $GITHUB_OUTPUT
+          echo "artifact_name=${ARTIFACT_NAME}" >> $GITHUB_OUTPUT
+
+          # 1. Human-readable diagnostic metadata
+          {
+            echo "================================================================================"
+            echo "HQRN CI SANITIZER FAILURE DIAGNOSTIC METADATA"
+            echo "================================================================================"
+            echo "Commit SHA:             ${COMMIT_SHA}"
+            echo "Short SHA:              ${SHORT_SHA}"
+            echo "Workflow Run ID:        ${RUN_ID}"
+            echo "Workflow Run Number:    ${RUN_NUMBER}"
+            echo "Workflow Run Attempt:   ${RUN_ATTEMPT} (Wiederholung: ${IS_RERUN})"
+            echo "Trigger Event:          ${EVENT_NAME}"
+            echo "Git Ref:                ${GIT_REF}"
+            echo "Git Ref Name:           ${GIT_REF_NAME}"
+            echo "Job Name:               ${JOB_NAME}"
+            echo "Target Compiler:        ${COMPILER_ID}"
+            echo "Workflow Name:          ${WORKFLOW_NAME}"
+            echo "Triggered By (Actor):   ${ACTOR}"
+            echo "Timestamp (UTC):        ${TIMESTAMP_ISO}"
+            echo "Timestamp (Epoch):      ${EPOCH}"
+            echo "Diagnostic Package:     ${ARTIFACT_NAME}"
+            echo "================================================================================"
+          } > sanitizer_diagnostics/diagnostic_metadata.txt
+
+          # 2. Machine-readable JSON metadata
+          cat <<EOF > sanitizer_diagnostics/metadata.json
+          {
+            "commit_sha": "${COMMIT_SHA}",
+            "short_sha": "${SHORT_SHA}",
+            "workflow_run_id": "${RUN_ID}",
+            "workflow_run_number": "${RUN_NUMBER}",
+            "workflow_run_attempt": ${RUN_ATTEMPT},
+            "is_rerun": ${IS_RERUN},
+            "trigger_event": "${EVENT_NAME}",
+            "git_ref": "${GIT_REF}",
+            "git_ref_name": "${GIT_REF_NAME}",
+            "job_name": "${JOB_NAME}",
+            "compiler": "${COMPILER_ID}",
+            "workflow": "${WORKFLOW_NAME}",
+            "actor": "${ACTOR}",
+            "timestamp_utc": "${TIMESTAMP_ISO}",
+            "timestamp_epoch": ${EPOCH},
+            "artifact_name": "${ARTIFACT_NAME}"
+          }
+          EOF
+
+          # 3. Formatted Step Summary markdown template
+          cat <<EOF > sanitizer_diagnostics/step_summary.md
+          ### ⚠️ Sanitizer-Lauf Fehlgeschlagen: Diagnose-Übersicht
+          | Parameter | Wert |
+          |---|---|
+          | **Commit-SHA** | `${COMMIT_SHA}` (`${SHORT_SHA}`) |
+          | **Workflow Run ID** | [${RUN_ID}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${RUN_ID}) (Run #${RUN_NUMBER}) |
+          | **Run Attempt (Wiederholung)** | **Versuch #${RUN_ATTEMPT}** |
+          | **Trigger-Event** | `${EVENT_NAME}` |
+          | **Git-Ref** | `${GIT_REF}` (`${GIT_REF_NAME}`) |
+          | **Jobname** | `${JOB_NAME}` |
+          | **Compiler / Ziel** | `Apple Clang` (macOS ARM64 Apple Silicon) |
+          | **Zeitpunkt (UTC)** | `${TIMESTAMP_ISO}` |
+          | **Artefakt-Paket** | `${ARTIFACT_NAME}` |
+
+          Die vollständigen Diagnose-Logs (Kompilierung, SIMD-, Skalar- und CTest-Logs samt CPU- und Compiler-Metadaten) wurden als Artefakt hochgeladen.
+          EOF
+
+      - name: Validate Diagnostic Metadata Consistency
+        env:
+          DIAGNOSTICS_DIR: sanitizer_diagnostics
+          EXP_RUN_ATTEMPT: ${{ github.run_attempt }}
+          EXP_TRIGGER_EVENT: ${{ github.event_name }}
+          EXP_GIT_REF: ${{ github.ref }}
+          EXP_GIT_REF_NAME: ${{ github.ref_name }}
+        run: |
+          python3 scripts/verify_diagnostic_metadata.py
+
+      - name: Verify Apple Silicon Architecture
+        run: |
+          echo "=== Machine Architecture ==="
+          uname -m
+          sysctl -n machdep.cpu.brand_string
+          if [ "$(uname -m)" != "arm64" ]; then
+            echo "ERROR: Expected arm64 runner but got $(uname -m)"
+            exit 1
+          fi
+
+      - name: Build & Run Native Release Targets (Apple Clang NEON & Skalar)
+        run: |
+          mkdir -p build_release
+          cmake -B build_release -DCMAKE_BUILD_TYPE=Release
+          cmake --build build_release
+          ctest --test-dir build_release --output-on-failure
+
+      - name: Record Diagnostic Environment & Compiler Metadata
+        run: |
+          {
+            echo "=== RUNNER SYSTEM & ARCHITECTURE ==="
+            uname -a
+            echo "Architecture: $(uname -m)"
+            sw_vers 2>/dev/null || true
+            echo "=== CPU HARDWARE SPECIFICATION ==="
+            sysctl -n machdep.cpu.brand_string 2>/dev/null || true
+            sysctl -a | grep machdep.cpu 2>/dev/null || true
+          } > sanitizer_diagnostics/runner_arch_info.txt
+
+          {
+            echo "=== COMPILER METADATA ==="
+            which clang++ || true
+            clang++ --version
+          } > sanitizer_diagnostics/compiler_version.txt
+
+      - name: Build & Run ASan + UBSan Sanitizer Targets (Apple Clang NEON & Skalar)
+        env:
+          ASAN_OPTIONS: "halt_on_error=1:abort_on_error=1"
+          UBSAN_OPTIONS: "halt_on_error=1:abort_on_error=1:print_stacktrace=1"
+        shell: bash
+        run: |
+          set -e
+          set -o pipefail
+
+          echo "=== Configuring Sanitizer Build ==="
+          cmake -B build_sanitizer -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON 2>&1 | tee sanitizer_diagnostics/build_configure_sanitizer.log
+
+          echo "=== Compiling Sanitizer Targets ==="
+          cmake --build build_sanitizer 2>&1 | tee sanitizer_diagnostics/build_compile_sanitizer.log
+
+          echo "=== Executing SIMD NEON Dispatch Test with ASan & UBSan ==="
+          ./build_sanitizer/test_cpu_dispatch 2>&1 | tee sanitizer_diagnostics/asan_ubsan_simd_dispatch.log
+
+          echo "=== Executing Skalar Fallback Test with ASan & UBSan ==="
+          ./build_sanitizer/test_cpu_dispatch_scalar 2>&1 | tee sanitizer_diagnostics/asan_ubsan_scalar_dispatch.log
+
+          echo "=== CTest Sanitizer Verification ==="
+          ctest --test-dir build_sanitizer --output-on-failure 2>&1 | tee sanitizer_diagnostics/ctest_sanitizer.log
+
+      - name: Summarize Sanitizer Failure in Workflow Run
+        if: failure()
+        run: |
+          if [ -n "$GITHUB_STEP_SUMMARY" ] && [ -f "sanitizer_diagnostics/step_summary.md" ]; then
+            cat sanitizer_diagnostics/step_summary.md >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload Sanitizer Failure Diagnostic Artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.meta.outputs.artifact_name || format('asan-ubsan-failure-{0}-apple-clang-run{1}-att{2}-{3}', github.job, github.run_id, github.run_attempt, github.sha) }}
+          path: sanitizer_diagnostics/
+          retention-days: 14
+          if-no-files-found: warn
+
+  # ===========================================================================
+  # 4. Isolated Diagnostic Metadata Verifier & Negative Injection Test
+  # ===========================================================================
+  test-diagnostic-verifier-negative:
+    name: Isolated Negative Test - Metadata Consistency Verification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Verify Documentation Anchors and Link Integrity
+        run: |
+          echo "=== Verifying Documentation Anchors & Strict Duplicate Validation ==="
+          python3 scripts/verify_markdown_anchors.py DIAGNOSTIC_METADATA_TESTING.md --required beispielpfad-1 beispielpfad-2 beispielpfad-3 beispielpfad-4 beispielpfad-5 --strict-duplicates
+          echo "=== Executing Markdown Anchor Regression & Invariant Test Suite ==="
+          python3 scripts/test_verify_markdown_anchors.py
+          echo "=== Executing Property-Based & Fuzzing Test Suite ==="
+          python3 scripts/fuzz_percent_encoding.py --iterations 2000 --verbose
+
+      - name: Run Full Isolated Negative Inconsistency Test Suite
+        run: |
+          echo "=== Executing 15 Automated Negative Inconsistency Test Scenarios ==="
+          python3 scripts/test_verify_diagnostic_metadata.py
+
+      - name: Live Negative Test - Inject Corrupted Run Attempt
+        env:
+          DIAGNOSTICS_DIR: test_bad_attempt_diag
+          EXP_RUN_ATTEMPT: "1"
+          EXP_TRIGGER_EVENT: "push"
+          EXP_GIT_REF: "refs/heads/main"
+        run: |
+          mkdir -p test_bad_attempt_diag
+          echo '{"workflow_run_attempt": 99, "trigger_event": "push", "git_ref": "refs/heads/main"}' > test_bad_attempt_diag/metadata.json
+          cat << 'ENDTXT' > test_bad_attempt_diag/diagnostic_metadata.txt
+          Workflow Run Attempt:   99
+          Trigger Event:          push
+          Git Ref:                refs/heads/main
+          ENDTXT
+          cat << 'ENDMD' > test_bad_attempt_diag/step_summary.md
+          | Parameter | Wert |
+          |---|---|
+          | **Run Attempt (Wiederholung)** | **Versuch #99** |
+          | **Trigger-Event** | `push` |
+          | **Git-Ref** | `refs/heads/main` |
+          ENDMD
+
+          echo "Running verifier against injected attempt mismatch (expected 1, got 99)..."
+          set +e
+          OUTPUT=$(python3 scripts/verify_diagnostic_metadata.py 2>&1)
+          EXIT_CODE=$?
+          set -e
+
+          echo "Verifier output:"
+          echo "$OUTPUT"
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "ERROR: Verifier unexpectedly passed with inconsistent run attempt!"
+            exit 1
+          fi
+
+          if ! echo "$OUTPUT" | grep -q "workflow_run_attempt mismatch"; then
+            echo "ERROR: Expected error message 'workflow_run_attempt mismatch' not found in verifier output!"
+            exit 1
+          fi
+
+          echo "SUCCESS: Verifier correctly rejected corrupted run attempt with expected diagnostic error message."
+
+      - name: Live Negative Test - Inject Corrupted Trigger Event
+        env:
+          DIAGNOSTICS_DIR: test_bad_event_diag
+          EXP_RUN_ATTEMPT: "1"
+          EXP_TRIGGER_EVENT: "push"
+          EXP_GIT_REF: "refs/heads/main"
+        run: |
+          mkdir -p test_bad_event_diag
+          echo '{"workflow_run_attempt": 1, "trigger_event": "pull_request", "git_ref": "refs/heads/main"}' > test_bad_event_diag/metadata.json
+          cat << 'ENDTXT' > test_bad_event_diag/diagnostic_metadata.txt
+          Workflow Run Attempt:   1
+          Trigger Event:          pull_request
+          Git Ref:                refs/heads/main
+          ENDTXT
+          cat << 'ENDMD' > test_bad_event_diag/step_summary.md
+          | Parameter | Wert |
+          |---|---|
+          | **Run Attempt (Wiederholung)** | **Versuch #1** |
+          | **Trigger-Event** | `pull_request` |
+          | **Git-Ref** | `refs/heads/main` |
+          ENDMD
+
+          echo "Running verifier against injected event mismatch (expected push, got pull_request)..."
+          set +e
+          OUTPUT=$(python3 scripts/verify_diagnostic_metadata.py 2>&1)
+          EXIT_CODE=$?
+          set -e
+
+          echo "Verifier output:"
+          echo "$OUTPUT"
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "ERROR: Verifier unexpectedly passed with inconsistent trigger event!"
+            exit 1
+          fi
+
+          if ! echo "$OUTPUT" | grep -q "trigger_event mismatch"; then
+            echo "ERROR: Expected error message 'trigger_event mismatch' not found in verifier output!"
+            exit 1
+          fi
+
+          echo "SUCCESS: Verifier correctly rejected corrupted trigger event with expected diagnostic error message."
+
+      - name: Live Negative Test - Inject Corrupted Git Ref
+        env:
+          DIAGNOSTICS_DIR: test_bad_ref_diag
+          EXP_RUN_ATTEMPT: "1"
+          EXP_TRIGGER_EVENT: "push"
+          EXP_GIT_REF: "refs/heads/main"
+        run: |
+          mkdir -p test_bad_ref_diag
+          echo '{"workflow_run_attempt": 1, "trigger_event": "push", "git_ref": "refs/heads/fake_branch"}' > test_bad_ref_diag/metadata.json
+          cat << 'ENDTXT' > test_bad_ref_diag/diagnostic_metadata.txt
+          Workflow Run Attempt:   1
+          Trigger Event:          push
+          Git Ref:                refs/heads/fake_branch
+          ENDTXT
+          cat << 'ENDMD' > test_bad_ref_diag/step_summary.md
+          | Parameter | Wert |
+          |---|---|
+          | **Run Attempt (Wiederholung)** | **Versuch #1** |
+          | **Trigger-Event** | `push` |
+          | **Git-Ref** | `refs/heads/fake_branch` |
+          ENDMD
+
+          echo "Running verifier against injected git_ref mismatch (expected refs/heads/main, got refs/heads/fake_branch)..."
+          set +e
+          OUTPUT=$(python3 scripts/verify_diagnostic_metadata.py 2>&1)
+          EXIT_CODE=$?
+          set -e
+
+          echo "Verifier output:"
+          echo "$OUTPUT"
+
+          if [ $EXIT_CODE -eq 0 ]; then
+            echo "ERROR: Verifier unexpectedly passed with inconsistent git ref!"
+            exit 1
+          fi
+
+          if ! echo "$OUTPUT" | grep -q "git_ref mismatch"; then
+            echo "ERROR: Expected error message 'git_ref mismatch' not found in verifier output!"
+            exit 1
+          fi
+
+          echo "SUCCESS: Verifier correctly rejected corrupted git ref with expected diagnostic error message."
