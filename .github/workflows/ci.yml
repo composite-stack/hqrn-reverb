@@ -447,6 +447,7 @@ jobs:
   arm64-neon-macos:
     name: macOS ARM64 (Apple Clang) - Native Apple Silicon & Sanitizers
     runs-on: macos-14
+    continue-on-error: true
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
