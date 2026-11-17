@@ -114,15 +114,15 @@ jobs:
           ### ⚠️ Sanitizer-Lauf Fehlgeschlagen: Diagnose-Übersicht
           | Parameter | Wert |
           |---|---|
-          | **Commit-SHA** | `${COMMIT_SHA}` (`${SHORT_SHA}`) |
+          | **Commit-SHA** | \`${COMMIT_SHA}\` (\`${SHORT_SHA}\`) |
           | **Workflow Run ID** | [${RUN_ID}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${RUN_ID}) (Run #${RUN_NUMBER}) |
           | **Run Attempt (Wiederholung)** | **Versuch #${RUN_ATTEMPT}** |
-          | **Trigger-Event** | `${EVENT_NAME}` |
-          | **Git-Ref** | `${GIT_REF}` (`${GIT_REF_NAME}`) |
-          | **Jobname** | `${JOB_NAME}` |
-          | **Compiler / Ziel** | `${COMPILER_ID}` (x86_64 AVX2/FMA) |
+          | **Trigger-Event** | \`${EVENT_NAME}\` |
+          | **Git-Ref** | \`${GIT_REF}\` (\`${GIT_REF_NAME}\`) |
+          | **Jobname** | \`${JOB_NAME}\` |
+          | **Compiler / Ziel** | \`${COMPILER_ID}\` (x86_64 AVX2/FMA) |
           | **Zeitpunkt (UTC)** | `${TIMESTAMP_ISO}` |
-          | **Artefakt-Paket** | `${ARTIFACT_NAME}` |
+          | **Artefakt-Paket** | \`${ARTIFACT_NAME}\` |
 
           Die vollständigen Diagnose-Logs (Kompilierung, SIMD-, Skalar- und CTest-Logs samt CPU- und Compiler-Metadaten) wurden als Artefakt hochgeladen.
           EOF
@@ -326,15 +326,15 @@ jobs:
           ### ⚠️ Sanitizer-Lauf Fehlgeschlagen: Diagnose-Übersicht
           | Parameter | Wert |
           |---|---|
-          | **Commit-SHA** | `${COMMIT_SHA}` (`${SHORT_SHA}`) |
+          | **Commit-SHA** | \`${COMMIT_SHA}\` (\`${SHORT_SHA}\`) |
           | **Workflow Run ID** | [${RUN_ID}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${RUN_ID}) (Run #${RUN_NUMBER}) |
           | **Run Attempt (Wiederholung)** | **Versuch #${RUN_ATTEMPT}** |
-          | **Trigger-Event** | `${EVENT_NAME}` |
-          | **Git-Ref** | `${GIT_REF}` (`${GIT_REF_NAME}`) |
-          | **Jobname** | `${JOB_NAME}` |
-          | **Compiler / Ziel** | `${COMPILER_ID}` (Linux ARM64 NEON) |
+          | **Trigger-Event** | \`${EVENT_NAME}\` |
+          | **Git-Ref** | \`${GIT_REF}\` (\`${GIT_REF_NAME}\`) |
+          | **Jobname** | \`${JOB_NAME}\` |
+          | **Compiler / Ziel** | \`${COMPILER_ID}\` (Linux ARM64 NEON) |
           | **Zeitpunkt (UTC)** | `${TIMESTAMP_ISO}` |
-          | **Artefakt-Paket** | `${ARTIFACT_NAME}` |
+          | **Artefakt-Paket** | \`${ARTIFACT_NAME}\` |
 
           Die vollständigen Diagnose-Logs (Kompilierung, SIMD-, Skalar- und CTest-Logs samt CPU- und Compiler-Metadaten) wurden als Artefakt hochgeladen.
           EOF
@@ -539,15 +539,15 @@ jobs:
           ### ⚠️ Sanitizer-Lauf Fehlgeschlagen: Diagnose-Übersicht
           | Parameter | Wert |
           |---|---|
-          | **Commit-SHA** | `${COMMIT_SHA}` (`${SHORT_SHA}`) |
+          | **Commit-SHA** | \`${COMMIT_SHA}\` (\`${SHORT_SHA}\`) |
           | **Workflow Run ID** | [${RUN_ID}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${RUN_ID}) (Run #${RUN_NUMBER}) |
           | **Run Attempt (Wiederholung)** | **Versuch #${RUN_ATTEMPT}** |
-          | **Trigger-Event** | `${EVENT_NAME}` |
-          | **Git-Ref** | `${GIT_REF}` (`${GIT_REF_NAME}`) |
-          | **Jobname** | `${JOB_NAME}` |
-          | **Compiler / Ziel** | `Apple Clang` (macOS ARM64 Apple Silicon) |
+          | **Trigger-Event** | \`${EVENT_NAME}\` |
+          | **Git-Ref** | \`${GIT_REF}\` (\`${GIT_REF_NAME}\`) |
+          | **Jobname** | \`${JOB_NAME}\` |
+          | **Compiler / Ziel** | \`Apple Clang\` (macOS ARM64 Apple Silicon) |
           | **Zeitpunkt (UTC)** | `${TIMESTAMP_ISO}` |
-          | **Artefakt-Paket** | `${ARTIFACT_NAME}` |
+          | **Artefakt-Paket** | \`${ARTIFACT_NAME}\` |
 
           Die vollständigen Diagnose-Logs (Kompilierung, SIMD-, Skalar- und CTest-Logs samt CPU- und Compiler-Metadaten) wurden als Artefakt hochgeladen.
           EOF
