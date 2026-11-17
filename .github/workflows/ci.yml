@@ -534,11 +534,11 @@ jobs:
           if-no-files-found: warn
 
   # ===========================================================================
-  # 3. Native macOS Apple Silicon Runner: macOS 14 / ARM64 (Native NEON)
+  # 3. Native macOS Apple Silicon Runner: macOS 15 / ARM64 (Native NEON)
   # ===========================================================================
   arm64-neon-macos:
     name: macOS ARM64 (Apple Clang) - Native Apple Silicon & Sanitizers
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -1089,13 +1089,10 @@ jobs:
   build-release-macos-arm64:
     name: Package macOS ARM64 (Apple Silicon)
     needs: [resolve-version]
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-
-      - name: Install Build Tools
-        run: brew install cmake ninja
 
       - name: Build & Package Native Apple Silicon SDK
         env:
@@ -1103,14 +1100,17 @@ jobs:
         run: |
           PKG_NAME="hqrn-${VERSION}-macos-arm64"
           mkdir -p dist
-          cmake -B build-macos -G Ninja \
+          echo "Configuring Apple Silicon Native Release Build..."
+          cmake -B build-macos \
             -DCMAKE_BUILD_TYPE=Release \
             -DENABLE_BENCHMARKS=ON \
             -DBUILD_TESTING=ON \
             -DCMAKE_INSTALL_PREFIX="/usr/local"
-          cmake --build build-macos
+          cmake --build build-macos --parallel
+          echo "Executing Apple Silicon Smoke Tests..."
           ./build-macos/test_cpu_dispatch
           ./build-macos/benchmark_vector_paths
+          echo "Installing into staging directory..."
           DESTDIR="$(pwd)/stage/${PKG_NAME}" cmake --install build-macos
           tar -czf "dist/${PKG_NAME}.tar.gz" -C stage "${PKG_NAME}"
           (cd stage && zip -q -r "../dist/${PKG_NAME}.zip" "${PKG_NAME}")
