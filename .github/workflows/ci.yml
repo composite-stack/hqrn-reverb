@@ -1,17 +1,109 @@
-name: HQRN Audio DSP CI (x86_64 AVX2/FMA & ARM64 NEON with ASan/UBSan & Failure Diagnostics)
+name: HQRN Audio DSP CI & Release (x86_64 AVX2, ARM64 NEON & Multi-Platform Packages)
 
 on:
   push:
     branches: [ main, master, develop ]
+    tags: [ 'v*' ]
   pull_request:
     branches: [ main, master, develop ]
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Publish official GitHub Release'
+        required: false
+        type: boolean
+        default: false
+      custom_version:
+        description: 'Custom version override (e.g. 0.1.0)'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  contents: write
+  actions: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/v') }}
 
 jobs:
+  # ===========================================================================
+  # 0. Version & Release Metadata Resolution
+  # ===========================================================================
+  resolve-version:
+    name: Resolve Version & Release Metadata
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag_name: ${{ steps.version.outputs.tag_name }}
+      is_tag: ${{ steps.version.outputs.is_tag }}
+      is_release: ${{ steps.version.outputs.is_release }}
+      short_sha: ${{ steps.version.outputs.short_sha }}
+      build_timestamp: ${{ steps.version.outputs.build_timestamp }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Compute Semantic Version
+        id: version
+        run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
+          IS_TAG=false
+          IS_RELEASE=false
+          PRERELEASE=false
+
+          if [[ "${{ github.ref }}" =~ ^refs/tags/v[0-9] ]]; then
+            IS_TAG=true
+            IS_RELEASE=true
+            TAG_NAME="${{ github.ref_name }}"
+            VERSION="${TAG_NAME#v}"
+            if [[ "${TAG_NAME}" == *"-"* ]]; then
+              PRERELEASE=true
+            fi
+          elif [ "${{ github.event.inputs.custom_version }}" != "" ]; then
+            RAW_VERSION="${{ github.event.inputs.custom_version }}"
+            VERSION="${RAW_VERSION#v}"
+            TAG_NAME="v${VERSION}"
+            if [ "${{ github.event.inputs.publish_release }}" = "true" ]; then
+              IS_RELEASE=true
+            fi
+            if [[ "${VERSION}" == *"-"* ]]; then
+              PRERELEASE=true
+            fi
+          else
+            VERSION="0.1.0-dev+${TIMESTAMP}.sha.${SHORT_SHA}"
+            TAG_NAME="v0.1.0-dev"
+            PRERELEASE=true
+            if [ "${{ github.event.inputs.publish_release }}" = "true" ]; then
+              IS_RELEASE=true
+            fi
+          fi
+
+          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid version '${VERSION}'. Expected semantic version X.Y.Z with optional prerelease/build metadata." >&2
+            exit 1
+          fi
+
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+          echo "is_tag=${IS_TAG}" >> $GITHUB_OUTPUT
+          echo "is_release=${IS_RELEASE}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "build_timestamp=${TIMESTAMP}" >> $GITHUB_OUTPUT
+          echo "prerelease=${PRERELEASE}" >> $GITHUB_OUTPUT
+
+          echo "### Version & Release Metadata" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Wert |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Version** | \`${VERSION}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Tag Name** | \`${TAG_NAME}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Is Git Tag** | \`${IS_TAG}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Publish Release** | \`${IS_RELEASE}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Prerelease** | \`${PRERELEASE}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Commit SHA** | \`${SHORT_SHA}\` |" >> $GITHUB_STEP_SUMMARY
   # ===========================================================================
   # 1. Native x86_64 Runner: AVX2 + FMA & Graceful Fallback
   # ===========================================================================
@@ -447,7 +539,6 @@ jobs:
   arm64-neon-macos:
     name: macOS ARM64 (Apple Clang) - Native Apple Silicon & Sanitizers
     runs-on: macos-14
-    continue-on-error: true
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -795,3 +886,421 @@ jobs:
           fi
 
           echo "SUCCESS: Verifier correctly rejected corrupted git ref with expected diagnostic error message."
+
+  # ===========================================================================
+  # 5. Release Build: Platform-Independent C++20 Header Package
+  # ===========================================================================
+  build-release-headers:
+    name: Package Platform-Independent Headers
+    needs: [resolve-version]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Assemble Header Package & CMake Config
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          PKG_NAME="hqrn-${VERSION}-headers"
+          mkdir -p "pkg/${PKG_NAME}/include/hqrn"
+          mkdir -p "pkg/${PKG_NAME}/share/doc/hqrn"
+          mkdir -p "pkg/${PKG_NAME}/lib/cmake/HQRN"
+
+          cp HQRNReverbEngine.hpp "pkg/${PKG_NAME}/include/hqrn/"
+          cp HQRNKernels.hpp "pkg/${PKG_NAME}/include/hqrn/"
+          cp README.md "pkg/${PKG_NAME}/share/doc/hqrn/"
+          cp DIAGNOSTIC_METADATA_TESTING.md "pkg/${PKG_NAME}/share/doc/hqrn/"
+
+          # Generate CMake Package Config
+          cat << EOF > "pkg/${PKG_NAME}/lib/cmake/HQRN/HQRNConfigVersion.cmake"
+          set(PACKAGE_VERSION "${VERSION}")
+          if(PACKAGE_VERSION VERSION_LESS PACKAGE_FIND_VERSION)
+            set(PACKAGE_VERSION_COMPATIBLE FALSE)
+          else()
+            set(PACKAGE_VERSION_COMPATIBLE TRUE)
+            if(PACKAGE_FIND_VERSION_MAJOR EQUAL 0)
+              if(NOT PACKAGE_FIND_VERSION_MINOR EQUAL 1)
+                set(PACKAGE_VERSION_COMPATIBLE FALSE)
+              endif()
+            endif()
+          endif()
+          EOF
+
+          cat << 'EOF' > "pkg/${PKG_NAME}/lib/cmake/HQRN/HQRNConfig.cmake"
+          if(NOT TARGET HQRN::hqrn)
+            add_library(HQRN::hqrn INTERFACE IMPORTED)
+            set_target_properties(HQRN::hqrn PROPERTIES
+              INTERFACE_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_LIST_DIR}/../../../include"
+              INTERFACE_COMPILE_FEATURES "cxx_std_20"
+            )
+          endif()
+          EOF
+
+          mkdir -p dist
+          tar -czf "dist/${PKG_NAME}.tar.gz" -C pkg "${PKG_NAME}"
+          (cd pkg && zip -q -r "../dist/${PKG_NAME}.zip" "${PKG_NAME}")
+
+          cd dist
+          sha256sum "${PKG_NAME}.tar.gz" "${PKG_NAME}.zip"
+
+      - name: Upload Header Package Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-pkg-headers
+          path: dist/*
+          retention-days: 14
+
+  # ===========================================================================
+  # 6. Release Build: Linux x86_64 (AVX2/FMA & Generic Scalar)
+  # ===========================================================================
+  build-release-linux-x86_64:
+    name: Package Linux x86_64 (AVX2 & Scalar)
+    needs: [resolve-version, x86_64-avx2-fma]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++-14
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
+
+      - name: Build & Package Native AVX2/FMA Optimized Binaries
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          PKG_NAME="hqrn-${VERSION}-linux-x86_64-avx2"
+          mkdir -p dist
+
+          echo "Configuring x86_64 AVX2/FMA Release Build..."
+          cmake -B build-avx2 -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DENABLE_BENCHMARKS=ON             -DBUILD_TESTING=ON             -DCMAKE_INSTALL_PREFIX="/usr"
+
+          cmake --build build-avx2
+
+          echo "Running Smoke Tests on AVX2 Binaries..."
+          ./build-avx2/test_cpu_dispatch
+          ./build-avx2/benchmark_vector_paths
+
+          echo "Installing into staging directory..."
+          DESTDIR="$(pwd)/stage-avx2/${PKG_NAME}" cmake --install build-avx2
+
+          tar -czf "dist/${PKG_NAME}.tar.gz" -C stage-avx2 "${PKG_NAME}"
+          (cd stage-avx2 && zip -q -r "../dist/${PKG_NAME}.zip" "${PKG_NAME}")
+
+      - name: Build & Package x86_64 Generic Scalar Fallback Binaries
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          PKG_NAME="hqrn-${VERSION}-linux-x86_64-scalar"
+
+          echo "Configuring x86_64 Scalar Release Build..."
+          cmake -B build-scalar -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DENABLE_BENCHMARKS=ON             -DBUILD_TESTING=ON             -DHQRN_FORCE_SCALAR=1             -DCMAKE_CXX_FLAGS="-DHQRN_FORCE_SCALAR=1 -mno-avx2 -mno-fma"             -DCMAKE_INSTALL_PREFIX="/usr"
+
+          cmake --build build-scalar
+
+          echo "Running Smoke Tests on Scalar Binaries..."
+          ./build-scalar/test_cpu_dispatch_scalar
+
+          echo "Installing into staging directory..."
+          DESTDIR="$(pwd)/stage-scalar/${PKG_NAME}" cmake --install build-scalar
+
+          tar -czf "dist/${PKG_NAME}.tar.gz" -C stage-scalar "${PKG_NAME}"
+          (cd stage-scalar && zip -q -r "../dist/${PKG_NAME}.zip" "${PKG_NAME}")
+
+      - name: Upload x86_64 Release Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-pkg-linux-x86_64
+          path: dist/*
+          retention-days: 14
+
+  # ===========================================================================
+  # 7. Release Build: Linux ARM64 (Native NEON & Generic Scalar)
+  # ===========================================================================
+  build-release-linux-arm64:
+    name: Package Linux ARM64 (NEON & Scalar)
+    needs: [resolve-version, arm64-neon-linux]
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++-14 zip
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-14 100
+
+      - name: Build & Package Native NEON Optimized Binaries
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          PKG_NAME="hqrn-${VERSION}-linux-aarch64-neon"
+          mkdir -p dist
+
+          echo "Configuring ARM64 NEON Release Build..."
+          cmake -B build-neon -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DENABLE_BENCHMARKS=ON             -DBUILD_TESTING=ON             -DCMAKE_INSTALL_PREFIX="/usr"
+
+          cmake --build build-neon
+
+          echo "Running Smoke Tests on Native ARM64 NEON Binaries..."
+          ./build-neon/test_cpu_dispatch
+          ./build-neon/benchmark_vector_paths
+
+          echo "Installing into staging directory..."
+          DESTDIR="$(pwd)/stage-neon/${PKG_NAME}" cmake --install build-neon
+
+          tar -czf "dist/${PKG_NAME}.tar.gz" -C stage-neon "${PKG_NAME}"
+          (cd stage-neon && zip -q -r "../dist/${PKG_NAME}.zip" "${PKG_NAME}")
+
+      - name: Build & Package ARM64 Generic Scalar Fallback Binaries
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          PKG_NAME="hqrn-${VERSION}-linux-aarch64-scalar"
+
+          echo "Configuring ARM64 Scalar Release Build..."
+          cmake -B build-scalar -G Ninja             -DCMAKE_BUILD_TYPE=Release             -DENABLE_BENCHMARKS=ON             -DBUILD_TESTING=ON             -DHQRN_FORCE_SCALAR=1             -DCMAKE_CXX_FLAGS="-DHQRN_FORCE_SCALAR=1"             -DCMAKE_INSTALL_PREFIX="/usr"
+
+          cmake --build build-scalar
+
+          echo "Running Smoke Tests on ARM64 Scalar Binaries..."
+          ./build-scalar/test_cpu_dispatch_scalar
+
+          echo "Installing into staging directory..."
+          DESTDIR="$(pwd)/stage-scalar/${PKG_NAME}" cmake --install build-scalar
+
+          tar -czf "dist/${PKG_NAME}.tar.gz" -C stage-scalar "${PKG_NAME}"
+          (cd stage-scalar && zip -q -r "../dist/${PKG_NAME}.zip" "${PKG_NAME}")
+
+      - name: Upload ARM64 Release Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-pkg-linux-arm64
+          path: dist/*
+          retention-days: 14
+
+  # ===========================================================================
+  # 8. Release Build: macOS ARM64 (Apple Silicon)
+  # ===========================================================================
+  build-release-macos-arm64:
+    name: Package macOS ARM64 (Apple Silicon)
+    needs: [resolve-version]
+    runs-on: macos-14
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Build Tools
+        run: brew install cmake ninja
+
+      - name: Build & Package Native Apple Silicon SDK
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+        run: |
+          PKG_NAME="hqrn-${VERSION}-macos-arm64"
+          mkdir -p dist
+          cmake -B build-macos -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DENABLE_BENCHMARKS=ON \
+            -DBUILD_TESTING=ON \
+            -DCMAKE_INSTALL_PREFIX="/usr/local"
+          cmake --build build-macos
+          ./build-macos/test_cpu_dispatch
+          ./build-macos/benchmark_vector_paths
+          DESTDIR="$(pwd)/stage/${PKG_NAME}" cmake --install build-macos
+          tar -czf "dist/${PKG_NAME}.tar.gz" -C stage "${PKG_NAME}"
+          (cd stage && zip -q -r "../dist/${PKG_NAME}.zip" "${PKG_NAME}")
+
+      - name: Upload macOS ARM64 Release Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-pkg-macos-arm64
+          path: dist/*
+          retention-days: 14
+
+  # ===========================================================================
+  # 8. Consolidate, Checksums, Manifest & Publish GitHub Release
+  # ===========================================================================
+  publish-release:
+    name: Consolidate Artifacts & Publish Release
+    needs:
+      - resolve-version
+      - x86_64-avx2-fma
+      - arm64-neon-linux
+      - test-diagnostic-verifier-negative
+      - build-release-headers
+      - build-release-linux-x86_64
+      - build-release-linux-arm64
+      - build-release-macos-arm64
+    if: ${{ always() && needs.resolve-version.result == 'success' && needs.x86_64-avx2-fma.result == 'success' && needs.arm64-neon-linux.result == 'success' && needs.test-diagnostic-verifier-negative.result == 'success' && needs.build-release-headers.result == 'success' && needs.build-release-linux-x86_64.result == 'success' && needs.build-release-linux-arm64.result == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Create Release Artifact Directory
+        run: mkdir -p release-dist
+
+      - name: Download Header Package
+        uses: actions/download-artifact@v4
+        with:
+          name: release-pkg-headers
+          path: release-dist
+
+      - name: Download Linux x86_64 Packages
+        uses: actions/download-artifact@v4
+        with:
+          name: release-pkg-linux-x86_64
+          path: release-dist
+
+      - name: Download Linux ARM64 Packages
+        uses: actions/download-artifact@v4
+        with:
+          name: release-pkg-linux-arm64
+          path: release-dist
+
+      - name: Download macOS ARM64 Packages (Optional Runner)
+        if: ${{ needs.build-release-macos-arm64.result == 'success' }}
+        uses: actions/download-artifact@v4
+        with:
+          name: release-pkg-macos-arm64
+          path: release-dist
+
+      - name: Compute Checksums & Validate Package Integrity
+        id: checksums
+        run: |
+          cd release-dist
+          echo "Verifying downloaded package archives:"
+          ls -la
+
+          # Generate SHA256 Checksums
+          sha256sum *.tar.gz *.zip > SHA256SUMS.txt
+          echo "Generated SHA256SUMS.txt:"
+          cat SHA256SUMS.txt
+
+          # Validate Checksums
+          echo "Validating SHA-256 integrity..."
+          sha256sum -c SHA256SUMS.txt
+          echo "Checksum verification PASSED."
+
+      - name: Generate Release Manifest & Release Notes
+        env:
+          VERSION: ${{ needs.resolve-version.outputs.version }}
+          TAG_NAME: ${{ needs.resolve-version.outputs.tag_name }}
+          COMMIT_SHA: ${{ github.sha }}
+          SHORT_SHA: ${{ needs.resolve-version.outputs.short_sha }}
+          IS_TAG: ${{ needs.resolve-version.outputs.is_tag }}
+          IS_RELEASE: ${{ needs.resolve-version.outputs.is_release }}
+          PRERELEASE: ${{ needs.resolve-version.outputs.prerelease }}
+          BUILD_TIME: ${{ needs.resolve-version.outputs.build_timestamp }}
+        run: |
+          python3 - << 'PYEOF'
+          import os, glob, hashlib, json
+
+          version = os.environ.get("VERSION", "0.1.0")
+          tag_name = os.environ.get("TAG_NAME", f"v{version}")
+          commit_sha = os.environ.get("COMMIT_SHA", "")
+          short_sha = os.environ.get("SHORT_SHA", "")
+          build_time = os.environ.get("BUILD_TIME", "")
+
+          files_info = []
+          for path in sorted(glob.glob("release-dist/*")):
+              fname = os.path.basename(path)
+              if fname in ("SHA256SUMS.txt", "RELEASE_MANIFEST.json", "release_notes.md"):
+                  continue
+              size = os.path.getsize(path)
+              with open(path, "rb") as f:
+                  digest = hashlib.sha256(f.read()).hexdigest()
+              
+              platform = "All"
+              arch = "Any"
+              if "linux-x86_64-avx2" in fname:
+                  platform = "Linux x86_64"
+                  arch = "AVX2 + FMA"
+              elif "linux-x86_64-scalar" in fname:
+                  platform = "Linux x86_64"
+                  arch = "Scalar Generic"
+              elif "linux-aarch64-neon" in fname:
+                  platform = "Linux aarch64 / ARM64"
+                  arch = "Native NEON"
+              elif "linux-aarch64-scalar" in fname:
+                  platform = "Linux aarch64 / ARM64"
+                  arch = "Scalar Generic"
+              elif "macos-arm64" in fname:
+                  platform = "macOS Apple Silicon"
+                  arch = "Native ARM64"
+              elif "headers" in fname:
+                  platform = "Header-only (C++20)"
+                  arch = "Platform Independent"
+
+              files_info.append({
+                  "filename": fname,
+                  "platform": platform,
+                  "arch": arch,
+                  "size_bytes": size,
+                  "sha256": digest
+              })
+
+          manifest = {
+              "project": "hqrn-reverb",
+              "version": version,
+              "tag_name": tag_name,
+              "commit_sha": commit_sha,
+              "short_sha": short_sha,
+              "build_timestamp": build_time,
+              "artifacts": files_info
+          }
+
+          with open("release-dist/RELEASE_MANIFEST.json", "w", encoding="utf-8") as f:
+              json.dump(manifest, f, indent=2)
+
+          # Write Release Notes Markdown
+          notes = "## HQRN Audio DSP Engine Release `" + tag_name + "`\n\n"
+          notes += "**Version:** `" + version + "`\n\n"
+          notes += "**Commit:** `" + short_sha + "` (" + commit_sha + ")\n\n"
+          notes += "**Build Timestamp (UTC):** `" + build_time + "`\n\n"
+          notes += "### Enthaltene Pakete & Artefakte\n| Dateiname | Plattform / Typ | CPU-Instruktionssatz | Größe (KB) |\n|---|---|---|---|\n"
+          for item in files_info:
+              kb = round(item["size_bytes"] / 1024, 1)
+              notes += f"| `{item['filename']}` | {item['platform']} | {item['arch']} | {kb} KB |\n"
+          notes += "\n### Paketinhalt\nDas HQRN-Core ist eine Header-only-C++20-Engine. Die Plattformarchive enthalten die Header, CMake-Paketkonfiguration, Tests und optional den Benchmark; sie enthalten weder ein VST-, AU- oder CLAP-Plugin noch eine vorkompilierte DSP-Bibliothek.\n\n### Prüfsummen (SHA-256)\n```text\n"
+          with open("release-dist/SHA256SUMS.txt", "r") as sf:
+              notes += sf.read()
+          notes += "```\n\n### Hinweise\n- C++20 Header-only DSP Engine\n- Native x86_64 AVX2/FMA-, Linux ARM64 NEON- und macOS Apple Silicon Builds\n- Generische skalare Varianten\n"
+          with open("release-dist/release_notes.md", "w", encoding="utf-8") as f:
+              f.write(notes)
+          PYEOF
+
+          # Append to GitHub Actions Summary
+          cat release-dist/release_notes.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Consolidated Release Bundle Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: hqrn-release-${{ needs.resolve-version.outputs.version }}
+          path: release-dist/*
+          retention-days: 90
+
+      - name: Publish Official GitHub Release
+        if: ${{ needs.resolve-version.outputs.is_release == 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG_NAME: ${{ needs.resolve-version.outputs.tag_name }}
+          PRERELEASE: ${{ needs.resolve-version.outputs.prerelease }}
+        run: |
+          echo "Publishing release for tag ${TAG_NAME}..."
+          EXTRA_FLAGS=""
+          if [ "${PRERELEASE}" = "true" ]; then
+            EXTRA_FLAGS="--prerelease"
+          fi
+
+          # Use GitHub CLI to create or update release
+          cd release-dist
+          gh release create "${TAG_NAME}"             *.tar.gz *.zip SHA256SUMS.txt RELEASE_MANIFEST.json             --title "HQRN Audio DSP Engine ${TAG_NAME}"             --notes-file release_notes.md             --target "${{ github.sha }}"             ${EXTRA_FLAGS}
