@@ -100,7 +100,7 @@ if(Python3_FOUND)
                      ${CMAKE_CURRENT_SOURCE_DIR}/DIAGNOSTIC_METADATA_TESTING.md
                      --required beispielpfad-1 beispielpfad-2 beispielpfad-3 beispielpfad-4 beispielpfad-5 --strict-duplicates)
     add_test(NAME test_doc_anchors_suite
-             COMMAND  /scripts/test_verify_markdown_anchors.py)
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_verify_markdown_anchors.py)
     add_test(NAME test_fuzz_percent_encoding
-             COMMAND  /scripts/fuzz_percent_encoding.py --iterations 1000)
+             COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/fuzz_percent_encoding.py --iterations 1000)
 endif()
