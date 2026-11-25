@@ -628,5 +628,202 @@ class TestRenderMetricsIntegration(unittest.TestCase):
         self.assertEqual(res.returncode, 1)
         self.assertIn("Fehler: --metrics-json darf kein leerer Pfad sein", res.stderr)
 
+    def test_22_metrics_json_valid_symlink_to_existing_file(self):
+        """Verifies that writing metrics through a symlink to an existing file succeeds and updates it."""
+        target_json = os.path.join(self.tmp_dir.name, "target_22.json")
+        with open(target_json, "w", encoding="utf-8") as f:
+            f.write('{"placeholder": true}')
+        symlink_json = os.path.join(self.tmp_dir.name, "sym_22.json")
+        os.symlink(target_json, symlink_json)
+
+        wav_path = os.path.join(self.tmp_dir.name, "out_22.wav")
+        cmd = [
+            self.renderer_bin,
+            "--mode", "impulse",
+            "--len", "0.1",
+            "-o", wav_path,
+            "--metrics-json", symlink_json
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, f"Expected 0 for valid symlink, got {res.returncode}. stderr={res.stderr}")
+        self.assertTrue(os.path.isfile(wav_path))
+        self.assertGreater(os.path.getsize(wav_path), 0)
+
+        with open(target_json, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertIn("peak_l_dbfs", data)
+        self.assertIn("sample_rate", data)
+        self.assertNotIn("placeholder", data)
+
+    def test_23_metrics_json_valid_symlink_to_new_file_in_writable_dir(self):
+        """Verifies that writing through a symlink pointing to a nonexistent file in a writable dir succeeds."""
+        target_new = os.path.join(self.tmp_dir.name, "target_new_23.json")
+        symlink_new = os.path.join(self.tmp_dir.name, "sym_new_23.json")
+        os.symlink(target_new, symlink_new)
+        self.assertFalse(os.path.exists(target_new))
+
+        wav_path = os.path.join(self.tmp_dir.name, "out_23.wav")
+        cmd = [
+            self.renderer_bin,
+            "--mode", "impulse",
+            "--len", "0.1",
+            "-o", wav_path,
+            "--metrics-json", symlink_new
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, f"Expected 0 for new file via symlink, got {res.returncode}. stderr={res.stderr}")
+        self.assertTrue(os.path.isfile(target_new))
+        self.assertTrue(os.path.isfile(wav_path))
+        self.assertGreater(os.path.getsize(wav_path), 0)
+
+        with open(target_new, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        self.assertIn("t60_target_sec", data)
+        self.assertIn("throughput_msamples", data)
+
+    def test_24_metrics_json_broken_symlink_nonexistent_directory(self):
+        """Verifies that a broken symlink pointing to a nonexistent folder fails with exit 1 and suppresses WAV."""
+        bad_target = os.path.join(self.tmp_dir.name, "missing_folder_24", "metrics.json")
+        broken_sym = os.path.join(self.tmp_dir.name, "broken_sym_24.json")
+        os.symlink(bad_target, broken_sym)
+
+        wav_path = os.path.join(self.tmp_dir.name, "out_24.wav")
+        cmd = [
+            self.renderer_bin,
+            "--mode", "impulse",
+            "--len", "0.1",
+            "-o", wav_path,
+            "--metrics-json", broken_sym
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("Fehler beim Öffnen der Metrik-JSON-Datei: " + broken_sym, res.stderr)
+        self.assertFalse(os.path.isfile(wav_path), "WAV must not be generated when metrics export fails")
+
+    def test_25_metrics_json_cyclic_symlink_error(self):
+        """Verifies that a cyclic symlink loop (ELOOP) fails with exit code 1 and suppresses WAV."""
+        loop_a = os.path.join(self.tmp_dir.name, "loop_a.json")
+        loop_b = os.path.join(self.tmp_dir.name, "loop_b.json")
+        os.symlink(loop_b, loop_a)
+        os.symlink(loop_a, loop_b)
+
+        wav_path = os.path.join(self.tmp_dir.name, "out_25.wav")
+        cmd = [
+            self.renderer_bin,
+            "--mode", "impulse",
+            "--len", "0.1",
+            "-o", wav_path,
+            "--metrics-json", loop_a
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("Fehler beim Öffnen der Metrik-JSON-Datei: " + loop_a, res.stderr)
+        self.assertFalse(os.path.isfile(wav_path), "WAV must not be generated on cyclic symlink")
+
+    def test_26_metrics_json_symlink_to_directory_error(self):
+        """Verifies that a symlink pointing to a directory (EISDIR) fails with exit code 1 and suppresses WAV."""
+        dir_target = os.path.join(self.tmp_dir.name, "target_dir_26")
+        os.makedirs(dir_target, exist_ok=True)
+        sym_to_dir = os.path.join(self.tmp_dir.name, "sym_dir_26")
+        os.symlink(dir_target, sym_to_dir)
+
+        wav_path = os.path.join(self.tmp_dir.name, "out_26.wav")
+        cmd = [
+            self.renderer_bin,
+            "--mode", "impulse",
+            "--len", "0.1",
+            "-o", wav_path,
+            "--metrics-json", sym_to_dir
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("Fehler beim Öffnen der Metrik-JSON-Datei: " + sym_to_dir, res.stderr)
+        self.assertFalse(os.path.isfile(wav_path), "WAV must not be generated when symlink resolves to a directory")
+
+    def test_27_metrics_json_unwritable_symlink_target_permission_denied(self):
+        """Verifies that a symlink pointing to a read-only target fails with exit code 1 and preserves target."""
+        rw_dir = os.path.join(self.tmp_dir.name, "rw_sym_dir_27")
+        os.makedirs(rw_dir, mode=0o777, exist_ok=True)
+        os.chmod(self.tmp_dir.name, 0o777)
+        ro_target = os.path.join(rw_dir, "readonly_target.json")
+        with open(ro_target, "w", encoding="utf-8") as f:
+            f.write('{"unmodified": true}')
+        os.chmod(ro_target, 0o444)
+
+        symlink_ro = os.path.join(rw_dir, "sym_to_ro.json")
+        os.symlink(ro_target, symlink_ro)
+        wav_path = os.path.join(self.tmp_dir.name, "out_27.wav")
+
+        kwargs = {}
+        if os.geteuid() == 0:
+            import pwd
+            try:
+                u = pwd.getpwnam("lovable") if "lovable" in [p.pw_name for p in pwd.getpwall()] else None
+                if u:
+                    kwargs["user"] = u.pw_uid
+                    kwargs["group"] = u.pw_gid
+            except Exception:
+                pass
+
+        if "user" not in kwargs and os.geteuid() == 0:
+            for ro_fs_candidate in ["/sys/kernel/profiling", "/proc/version"]:
+                if os.path.exists(ro_fs_candidate):
+                    symlink_ro = os.path.join(rw_dir, "sym_sys_ro.json")
+                    if os.path.exists(symlink_ro) or os.path.islink(symlink_ro):
+                        os.remove(symlink_ro)
+                    os.symlink(ro_fs_candidate, symlink_ro)
+                    ro_target = ro_fs_candidate
+                    break
+
+        cmd = [
+            self.renderer_bin,
+            "--mode", "impulse",
+            "--len", "0.1",
+            "-o", wav_path,
+            "--metrics-json", symlink_ro
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True, **kwargs)
+
+        if os.path.isfile(os.path.join(rw_dir, "readonly_target.json")):
+            os.chmod(os.path.join(rw_dir, "readonly_target.json"), 0o666)
+
+        self.assertEqual(res.returncode, 1, f"Expected exit code 1 for unwritable symlink target, got {res.returncode}")
+        self.assertTrue(
+            ("Fehler beim Öffnen der Metrik-JSON-Datei: " + symlink_ro) in res.stderr
+            or ("Fehler beim Schreiben der Metrik-JSON-Datei: " + symlink_ro) in res.stderr,
+            f"Expected error message mentioning {symlink_ro}, got: {res.stderr}"
+        )
+        self.assertFalse(os.path.isfile(wav_path), "WAV must not be generated when symlink target is unwritable")
+        if ro_target == os.path.join(rw_dir, "readonly_target.json"):
+            with open(ro_target, "r", encoding="utf-8") as f:
+                content = f.read()
+            self.assertEqual(content, '{"unmodified": true}')
+
+    def test_28_metrics_json_symlink_failure_preserves_existing_wav(self):
+        """Verifies that an existing WAV file is preserved completely untouched if metrics symlink export fails."""
+        wav_path = os.path.join(self.tmp_dir.name, "pre_existing_28.wav")
+        original_bytes = b"RIFF_PRE_EXISTING_CANARY_PAYLOAD_1234567890"
+        with open(wav_path, "wb") as f:
+            f.write(original_bytes)
+
+        bad_target = os.path.join(self.tmp_dir.name, "nonexistent_dir_28", "metrics.json")
+        broken_sym = os.path.join(self.tmp_dir.name, "broken_sym_28.json")
+        os.symlink(bad_target, broken_sym)
+
+        cmd = [
+            self.renderer_bin,
+            "--mode", "impulse",
+            "--len", "0.1",
+            "-o", wav_path,
+            "--metrics-json", broken_sym
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("Fehler beim Öffnen der Metrik-JSON-Datei: " + broken_sym, res.stderr)
+        self.assertTrue(os.path.isfile(wav_path), "Existing WAV file must still exist")
+        with open(wav_path, "rb") as f:
+            current_bytes = f.read()
+        self.assertEqual(current_bytes, original_bytes, "Existing WAV file must not be modified or truncated")
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
