@@ -1170,10 +1170,18 @@ public:
     void prepare(float sampleRate) noexcept {
         sampleRate_ = sampleRate;
         updateKnee();
+        reset();
+    }
+
+    void reset() noexcept {
         stage1UpL_.reset(); stage1UpR_.reset();
         stage2UpL_.reset(); stage2UpR_.reset();
         stage1DownL_.reset(); stage1DownR_.reset();
         stage2DownL_.reset(); stage2DownR_.reset();
+    }
+
+    [[nodiscard]] size_t getLatencySamples() const noexcept {
+        return enabled_ ? 22 : 0;
     }
 
     void setCeilingDb(float ceilingDb) noexcept {
@@ -1274,10 +1282,18 @@ public:
     void prepare(float sampleRate) noexcept {
         sampleRate_ = sampleRate;
         updateKnee();
+        reset();
+    }
+
+    void reset() noexcept {
         stage1UpL_.reset(); stage1UpR_.reset();
         stage2UpL_.reset(); stage2UpR_.reset();
         stage1DownL_.reset(); stage1DownR_.reset();
         stage2DownL_.reset(); stage2DownR_.reset();
+    }
+
+    [[nodiscard]] size_t getLatencySamples() const noexcept {
+        return enabled_ ? 22 : 0;
     }
 
     void setCeilingDb(float ceilingDb) noexcept {
@@ -1433,10 +1449,18 @@ public:
     void prepare(float sampleRate) noexcept {
         sampleRate_ = sampleRate;
         updateKnee();
+        reset();
+    }
+
+    void reset() noexcept {
         stage1UpL_.reset(); stage1UpR_.reset();
         stage2UpL_.reset(); stage2UpR_.reset();
         stage1DownL_.reset(); stage1DownR_.reset();
         stage2DownL_.reset(); stage2DownR_.reset();
+    }
+
+    [[nodiscard]] size_t getLatencySamples() const noexcept {
+        return enabled_ ? 22 : 0;
     }
 
     void setCeilingDb(float ceilingDb) noexcept {
@@ -1635,6 +1659,20 @@ public:
         neon_.setEnabled(enable);
     }
 
+    [[nodiscard]] bool isEnabled() const noexcept {
+        return scalar_.isEnabled();
+    }
+
+    void reset() noexcept {
+        scalar_.reset();
+        avx2_.reset();
+        neon_.reset();
+    }
+
+    [[nodiscard]] size_t getLatencySamples() const noexcept {
+        return isEnabled() ? 22 : 0;
+    }
+
     void processStereo(float inL, float inR, float& outL, float& outR) noexcept {
         switch (path_) {
             case CpuSimdPath::AVX2:   avx2_.processStereo(inL, inR, outL, outR); break;
@@ -1680,6 +1718,11 @@ public:
 
     void reset() noexcept {
         kernel_.reset();
+        clipper_.reset();
+    }
+
+    [[nodiscard]] size_t getLatencySamples() const noexcept {
+        return clipper_.getLatencySamples();
     }
 
     void setBaseFrequency(float fBaseHz) noexcept { kernel_.setBaseFrequency(fBaseHz); }
@@ -1763,6 +1806,15 @@ public:
         scalarEngine_.reset();
         avx2Engine_.reset();
         neonEngine_.reset();
+    }
+
+    [[nodiscard]] size_t getLatencySamples() const noexcept {
+        switch (path_) {
+            case CpuSimdPath::AVX2:   return avx2Engine_.getLatencySamples();
+            case CpuSimdPath::NEON:   return neonEngine_.getLatencySamples();
+            case CpuSimdPath::Scalar:
+            default:                  return scalarEngine_.getLatencySamples();
+        }
     }
 
     void setSimdPath(CpuSimdPath path) noexcept {

@@ -4,7 +4,7 @@ SAN_FLAGS ?= -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-
 
 .PHONY: all test test-avx2 test-scalar test-arm-neon test-asan-ubsan test-asan-avx2 test-asan-scalar test-asan-neon clean
 
-all: test_cpu_dispatch test_cpu_dispatch_scalar
+all: test_cpu_dispatch test_cpu_dispatch_scalar test_daw_adapter test_daw_adapter_scalar
 
 test_cpu_dispatch: test_cpu_dispatch.cpp HQRNKernels.hpp HQRNReverbEngine.hpp
 	$(CXX) $(CXXFLAGS) -mavx2 -mfma test_cpu_dispatch.cpp -o test_cpu_dispatch
@@ -25,7 +25,7 @@ test_cpu_dispatch_scalar_asan: test_cpu_dispatch.cpp HQRNKernels.hpp HQRNReverbE
 test_cpu_dispatch_neon_asan: test_cpu_dispatch.cpp HQRNKernels.hpp HQRNReverbEngine.hpp
 	$(CXX) $(CXXFLAGS) $(SAN_FLAGS) test_cpu_dispatch.cpp -o test_cpu_dispatch_neon_asan
 
-test: test-avx2 test-scalar
+test: test-avx2 test-scalar test-adapter test-adapter-scalar
 
 test-avx2: test_cpu_dispatch
 	./test_cpu_dispatch
@@ -37,7 +37,7 @@ test-arm-neon: test_cpu_dispatch_neon
 	./test_cpu_dispatch_neon
 
 # Sanitizer Execution (ASan + UBSan)
-test-asan-ubsan: test-asan-avx2 test-asan-scalar
+test-asan-ubsan: test-asan-avx2 test-asan-scalar test-asan-adapter test-asan-adapter-scalar
 
 test-asan-avx2: test_cpu_dispatch_asan
 	ASAN_OPTIONS="halt_on_error=1:abort_on_error=1:detect_leaks=1" \
@@ -55,6 +55,45 @@ test-asan-neon: test_cpu_dispatch_neon_asan
 	./test_cpu_dispatch_neon_asan
 
 
+
+# DAW Buffer Adapter Targets
+test_daw_adapter: test_daw_adapter.cpp HQRNKernels.hpp HQRNReverbEngine.hpp HQRNDawAdapter.hpp
+	$(CXX) $(CXXFLAGS) -mavx2 -mfma test_daw_adapter.cpp -o test_daw_adapter
+
+test_daw_adapter_scalar: test_daw_adapter.cpp HQRNKernels.hpp HQRNReverbEngine.hpp HQRNDawAdapter.hpp
+	$(CXX) $(CXXFLAGS) -mno-avx2 -mno-fma -DHQRN_FORCE_SCALAR=1 test_daw_adapter.cpp -o test_daw_adapter_scalar
+
+test_daw_adapter_neon: test_daw_adapter.cpp HQRNKernels.hpp HQRNReverbEngine.hpp HQRNDawAdapter.hpp
+	$(CXX) $(CXXFLAGS) test_daw_adapter.cpp -o test_daw_adapter_neon
+
+test_daw_adapter_asan: test_daw_adapter.cpp HQRNKernels.hpp HQRNReverbEngine.hpp HQRNDawAdapter.hpp
+	$(CXX) $(CXXFLAGS) $(SAN_FLAGS) -mavx2 -mfma test_daw_adapter.cpp -o test_daw_adapter_asan
+
+test_daw_adapter_scalar_asan: test_daw_adapter.cpp HQRNKernels.hpp HQRNReverbEngine.hpp HQRNDawAdapter.hpp
+	$(CXX) $(CXXFLAGS) $(SAN_FLAGS) -mno-avx2 -mno-fma -DHQRN_FORCE_SCALAR=1 test_daw_adapter.cpp -o test_daw_adapter_scalar_asan
+
+test_daw_adapter_neon_asan: test_daw_adapter.cpp HQRNKernels.hpp HQRNReverbEngine.hpp HQRNDawAdapter.hpp
+	$(CXX) $(CXXFLAGS) $(SAN_FLAGS) test_daw_adapter.cpp -o test_daw_adapter_neon_asan
+
+test-adapter: test_daw_adapter
+	./test_daw_adapter
+
+test-adapter-scalar: test_daw_adapter_scalar
+	./test_daw_adapter_scalar
+
+test-adapter-neon: test_daw_adapter_neon
+	./test_daw_adapter_neon
+
+test-asan-adapter: test_daw_adapter_asan
+	ASAN_OPTIONS="halt_on_error=1:abort_on_error=1:detect_leaks=1" \
+	UBSAN_OPTIONS="halt_on_error=1:abort_on_error=1:print_stacktrace=1" \
+	./test_daw_adapter_asan
+
+test-asan-adapter-scalar: test_daw_adapter_scalar_asan
+	ASAN_OPTIONS="halt_on_error=1:abort_on_error=1:detect_leaks=1" \
+	UBSAN_OPTIONS="halt_on_error=1:abort_on_error=1:print_stacktrace=1" \
+	./test_daw_adapter_scalar_asan
+
 UNAME_M := $(shell uname -m)
 
 # Offline Renderer Target
@@ -71,6 +110,8 @@ endif
 clean:
 	rm -f test_cpu_dispatch test_cpu_dispatch_scalar test_cpu_dispatch_neon \
 	      test_cpu_dispatch_asan test_cpu_dispatch_scalar_asan test_cpu_dispatch_neon_asan \
+	      test_daw_adapter test_daw_adapter_scalar test_daw_adapter_neon \
+	      test_daw_adapter_asan test_daw_adapter_scalar_asan test_daw_adapter_neon_asan \
 	      hqrn_render test_render_impulse.wav *.wav
 
 # Diagnostic Metadata Verifier Negative Test Suite

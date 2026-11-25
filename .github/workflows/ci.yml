@@ -297,6 +297,12 @@ jobs:
           echo "=== Executing Skalar Fallback Test with ASan & UBSan ==="
           ./build_sanitizer/test_cpu_dispatch_scalar 2>&1 | tee sanitizer_diagnostics/asan_ubsan_scalar_dispatch.log
 
+          echo "=== Executing DAW Adapter Test with ASan & UBSan ==="
+          ./build_sanitizer/test_daw_adapter 2>&1 | tee sanitizer_diagnostics/asan_ubsan_daw_adapter.log
+
+          echo "=== Executing DAW Adapter Skalar Test with ASan & UBSan ==="
+          ./build_sanitizer/test_daw_adapter_scalar 2>&1 | tee sanitizer_diagnostics/asan_ubsan_daw_adapter_scalar.log
+
           echo "=== Executing Standalone Renderer with ASan & UBSan ==="
           ./build_sanitizer/hqrn_render --mode impulse --len 0.1 --output sanitizer_render_smoke.wav 2>&1 | tee sanitizer_diagnostics/asan_ubsan_render.log
 
@@ -516,6 +522,12 @@ jobs:
 
           echo "=== Executing Skalar Fallback Test with ASan & UBSan ==="
           ./build_sanitizer/test_cpu_dispatch_scalar 2>&1 | tee sanitizer_diagnostics/asan_ubsan_scalar_dispatch.log
+
+          echo "=== Executing DAW Adapter Test with ASan & UBSan ==="
+          ./build_sanitizer/test_daw_adapter 2>&1 | tee sanitizer_diagnostics/asan_ubsan_daw_adapter.log
+
+          echo "=== Executing DAW Adapter Skalar Test with ASan & UBSan ==="
+          ./build_sanitizer/test_daw_adapter_scalar 2>&1 | tee sanitizer_diagnostics/asan_ubsan_daw_adapter_scalar.log
 
           echo "=== Executing Standalone Renderer with ASan & UBSan ==="
           ./build_sanitizer/hqrn_render --mode impulse --len 0.1 --output sanitizer_render_smoke.wav 2>&1 | tee sanitizer_diagnostics/asan_ubsan_render.log
@@ -786,6 +798,12 @@ jobs:
           echo "=== Executing Skalar Fallback Test with ASan & UBSan ==="
           ./build_sanitizer/test_cpu_dispatch_scalar 2>&1 | tee sanitizer_diagnostics/asan_ubsan_scalar_dispatch.log
 
+          echo "=== Executing DAW Adapter Test with ASan & UBSan ==="
+          ./build_sanitizer/test_daw_adapter 2>&1 | tee sanitizer_diagnostics/asan_ubsan_daw_adapter.log
+
+          echo "=== Executing DAW Adapter Skalar Test with ASan & UBSan ==="
+          ./build_sanitizer/test_daw_adapter_scalar 2>&1 | tee sanitizer_diagnostics/asan_ubsan_daw_adapter_scalar.log
+
           echo "=== Executing Standalone Renderer with ASan & UBSan ==="
           ./build_sanitizer/hqrn_render --mode impulse --len 0.1 --output sanitizer_render_smoke.wav 2>&1 | tee sanitizer_diagnostics/asan_ubsan_render.log
 
@@ -999,6 +1017,7 @@ jobs:
 
           cp HQRNReverbEngine.hpp "pkg/${PKG_NAME}/include/hqrn/"
           cp HQRNKernels.hpp "pkg/${PKG_NAME}/include/hqrn/"
+          cp HQRNDawAdapter.hpp "pkg/${PKG_NAME}/include/hqrn/"
           cp README.md "pkg/${PKG_NAME}/share/doc/hqrn/"
           cp DIAGNOSTIC_METADATA_TESTING.md "pkg/${PKG_NAME}/share/doc/hqrn/"
 
@@ -1072,6 +1091,7 @@ jobs:
 
           echo "Running Smoke Tests on AVX2 Binaries..."
           ./build-avx2/test_cpu_dispatch
+          ./build-avx2/test_daw_adapter
           ./build-avx2/benchmark_vector_paths
 
           echo "Installing into staging directory..."
@@ -1138,6 +1158,7 @@ jobs:
 
           echo "Running Smoke Tests on Native ARM64 NEON Binaries..."
           ./build-neon/test_cpu_dispatch
+          ./build-neon/test_daw_adapter
           ./build-neon/benchmark_vector_paths
 
           echo "Installing into staging directory..."
@@ -1199,6 +1220,7 @@ jobs:
           cmake --build build-macos --parallel
           echo "Executing Apple Silicon Smoke Tests..."
           ./build-macos/test_cpu_dispatch
+          ./build-macos/test_daw_adapter
           ./build-macos/benchmark_vector_paths
           ./build-macos/hqrn_render --mode impulse --len 0.1 --output macos_pkg_smoke.wav
           echo "Installing into staging directory..."

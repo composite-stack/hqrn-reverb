@@ -18,6 +18,8 @@ test_cpu_dispatch_scalar
 test_cpu_dispatch_neon
 test_cpu_dispatch_scalar_asan
 test_cpu_dispatch_neon_asan
+test_daw_adapter
+test_daw_adapter_*
 hqrn_render
 hqrn_render_*
 *.wav

@@ -86,6 +86,21 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME test_cpu_dispatch_scalar COMMAND test_cpu_dispatch_scalar)
 
+    add_executable(test_daw_adapter test_daw_adapter.cpp)
+    target_link_libraries(test_daw_adapter PRIVATE hqrn)
+    if(SIMD_COMPILE_FLAGS)
+        target_compile_options(test_daw_adapter PRIVATE ${SIMD_COMPILE_FLAGS})
+    endif()
+    add_test(NAME test_daw_adapter COMMAND test_daw_adapter)
+
+    add_executable(test_daw_adapter_scalar test_daw_adapter.cpp)
+    target_link_libraries(test_daw_adapter_scalar PRIVATE hqrn)
+    if(SCALAR_COMPILE_FLAGS)
+        target_compile_options(test_daw_adapter_scalar PRIVATE ${SCALAR_COMPILE_FLAGS})
+    endif()
+    add_test(NAME test_daw_adapter_scalar COMMAND test_daw_adapter_scalar)
+
+
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_FOUND)
         add_test(NAME test_metadata_verifier_negative
@@ -150,6 +165,7 @@ install(TARGETS hqrn
 install(FILES
     HQRNReverbEngine.hpp
     HQRNKernels.hpp
+    HQRNDawAdapter.hpp
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/hqrn
 )
 
@@ -161,6 +177,12 @@ install(FILES
 
 if(TARGET benchmark_vector_paths)
     install(TARGETS benchmark_vector_paths
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    )
+endif()
+
+if(TARGET test_daw_adapter)
+    install(TARGETS test_daw_adapter
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
     )
 endif()

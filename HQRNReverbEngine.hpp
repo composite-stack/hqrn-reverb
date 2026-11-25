@@ -226,10 +226,18 @@ class TruePeakClipper {
 public:
     void prepare(float sampleRate) noexcept {
         sampleRate_ = sampleRate;
+        reset();
+    }
+
+    void reset() noexcept {
         stage1UpL_.reset(); stage1UpR_.reset();
         stage2UpL_.reset(); stage2UpR_.reset();
         stage1DownL_.reset(); stage1DownR_.reset();
         stage2DownL_.reset(); stage2DownR_.reset();
+    }
+
+    [[nodiscard]] size_t getLatencySamples() const noexcept {
+        return enabled_ ? 22 : 0;
     }
 
     void setCeilingDb(float ceilingDb) noexcept {
@@ -526,6 +534,11 @@ public:
 
     void reset() noexcept {
         kernel_.reset();
+        clipper_.reset();
+    }
+
+    [[nodiscard]] size_t getLatencySamples() const noexcept {
+        return clipper_.getLatencySamples();
     }
 
     void setBaseFrequency(float fBaseHz) noexcept { kernel_.setBaseFrequency(fBaseHz); }
