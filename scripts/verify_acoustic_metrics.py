@@ -373,9 +373,9 @@ def main():
     parser.add_argument("--metrics-json", type=str, help="Path to JSON metrics file exported by hqrn_render")
     parser.add_argument("--wav", type=str, help="Path to WAV file to evaluate directly")
     parser.add_argument("--target-t60", type=float, help="Target T60 in seconds")
-    parser.add_argument("--tolerance", type=float, default=0.15, help="Max relative error vs target T60 (default: 0.15 = 15%)")
-    parser.add_argument("--stereo-tolerance", type=float, default=0.15, help="Max relative stereo discrepancy (default: 0.15 = 15%)")
-    parser.add_argument("--decay-tolerance", type=float, default=0.20, help="Max relative curvature divergence between EDT, T20, T30 (default: 0.20 = 20%)")
+    parser.add_argument("--tolerance", type=float, default=0.15, help="Max relative error vs target T60 (default: 0.15 = 15%%)")
+    parser.add_argument("--stereo-tolerance", type=float, default=0.15, help="Max relative stereo discrepancy (default: 0.15 = 15%%)")
+    parser.add_argument("--decay-tolerance", type=float, default=0.20, help="Max relative curvature divergence between EDT, T20, T30 (default: 0.20 = 20%%)")
     parser.add_argument("--report-json", type=str, help="Optional path to output machine-readable verification report")
 
     args = parser.parse_args()
