@@ -71,7 +71,7 @@ endif
 clean:
 	rm -f test_cpu_dispatch test_cpu_dispatch_scalar test_cpu_dispatch_neon \
 	      test_cpu_dispatch_asan test_cpu_dispatch_scalar_asan test_cpu_dispatch_neon_asan \
-	      hqrn_render test_render_impulse.wav
+	      hqrn_render test_render_impulse.wav *.wav
 
 # Diagnostic Metadata Verifier Negative Test Suite
 .PHONY: test-metadata-negative

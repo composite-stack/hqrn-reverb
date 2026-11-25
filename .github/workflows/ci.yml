@@ -297,6 +297,9 @@ jobs:
           echo "=== Executing Skalar Fallback Test with ASan & UBSan ==="
           ./build_sanitizer/test_cpu_dispatch_scalar 2>&1 | tee sanitizer_diagnostics/asan_ubsan_scalar_dispatch.log
 
+          echo "=== Executing Standalone Renderer with ASan & UBSan ==="
+          ./build_sanitizer/hqrn_render --mode impulse --len 0.1 --output sanitizer_render_smoke.wav 2>&1 | tee sanitizer_diagnostics/asan_ubsan_render.log
+
           echo "=== CTest Sanitizer Verification ==="
           ctest --test-dir build_sanitizer --output-on-failure 2>&1 | tee sanitizer_diagnostics/ctest_sanitizer.log
 
@@ -514,6 +517,9 @@ jobs:
           echo "=== Executing Skalar Fallback Test with ASan & UBSan ==="
           ./build_sanitizer/test_cpu_dispatch_scalar 2>&1 | tee sanitizer_diagnostics/asan_ubsan_scalar_dispatch.log
 
+          echo "=== Executing Standalone Renderer with ASan & UBSan ==="
+          ./build_sanitizer/hqrn_render --mode impulse --len 0.1 --output sanitizer_render_smoke.wav 2>&1 | tee sanitizer_diagnostics/asan_ubsan_render.log
+
           echo "=== CTest Sanitizer Verification ==="
           ctest --test-dir build_sanitizer --output-on-failure 2>&1 | tee sanitizer_diagnostics/ctest_sanitizer.log
 
@@ -671,6 +677,30 @@ jobs:
           cmake --build build_release
           ctest --test-dir build_release --output-on-failure
 
+      - name: Offline Audio Renderer Smoke Test (Apple Silicon Native WAV Generation)
+        run: |
+          echo "=== 1. Testing Standalone Renderer via CMake Target ==="
+          ./build_release/hqrn_render --mode impulse --t60 1.5 --fbase 120 --len 0.2 --output macos_smoke_impulse.wav
+          ./build_release/hqrn_render --mode orbit --t60 1.2 --len 0.2 --output macos_smoke_orbit.wav
+
+          echo "=== 2. Testing Standalone Renderer via Makefile Target ==="
+          make render
+          ./hqrn_render --mode burst --len 0.1 --output macos_smoke_burst.wav
+
+          echo "=== 3. Verifying Generated WAV Files (Headers & Payload) ==="
+          ls -la macos_smoke_*.wav
+          python3 -c "
+          import wave
+          files = ['macos_smoke_impulse.wav', 'macos_smoke_orbit.wav', 'macos_smoke_burst.wav']
+          for f in files:
+              with wave.open(f, 'rb') as w:
+                  print(f'Verified {f}: {w.getnchannels()}ch, {w.getsampwidth()}bytes/sample, {w.getframerate()}Hz, {w.getnframes()} frames')
+                  assert w.getnchannels() == 2, f'Expected stereo (2 channels) in {f}'
+                  assert w.getframerate() == 48000, f'Expected 48 kHz in {f}'
+                  assert w.getnframes() > 0, f'Expected non-empty audio in {f}'
+          print('All macOS WAV smoke test outputs validated successfully.')
+          " 
+
       - name: Record Diagnostic Environment & Compiler Metadata
         run: |
           {
@@ -709,6 +739,9 @@ jobs:
 
           echo "=== Executing Skalar Fallback Test with ASan & UBSan ==="
           ./build_sanitizer/test_cpu_dispatch_scalar 2>&1 | tee sanitizer_diagnostics/asan_ubsan_scalar_dispatch.log
+
+          echo "=== Executing Standalone Renderer with ASan & UBSan ==="
+          ./build_sanitizer/hqrn_render --mode impulse --len 0.1 --output sanitizer_render_smoke.wav 2>&1 | tee sanitizer_diagnostics/asan_ubsan_render.log
 
           echo "=== CTest Sanitizer Verification ==="
           ctest --test-dir build_sanitizer --output-on-failure 2>&1 | tee sanitizer_diagnostics/ctest_sanitizer.log
@@ -1088,7 +1121,7 @@ jobs:
   # ===========================================================================
   build-release-macos-arm64:
     name: Package macOS ARM64 (Apple Silicon)
-    needs: [resolve-version]
+    needs: [resolve-version, arm64-neon-macos]
     runs-on: macos-15
     steps:
       - name: Checkout Code
@@ -1110,6 +1143,7 @@ jobs:
           echo "Executing Apple Silicon Smoke Tests..."
           ./build-macos/test_cpu_dispatch
           ./build-macos/benchmark_vector_paths
+          ./build-macos/hqrn_render --mode impulse --len 0.1 --output macos_pkg_smoke.wav
           echo "Installing into staging directory..."
           DESTDIR="$(pwd)/stage/${PKG_NAME}" cmake --install build-macos
           tar -czf "dist/${PKG_NAME}.tar.gz" -C stage "${PKG_NAME}"
