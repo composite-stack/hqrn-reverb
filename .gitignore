@@ -40,3 +40,9 @@ sed*
 .DS_Store
 .vscode/
 .idea/
+
+# Test and smoke metrics JSON
+test_*.json
+macos_smoke_*.json
+smoke_*.json
+ctest_*.json

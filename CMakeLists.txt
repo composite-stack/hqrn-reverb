@@ -90,6 +90,8 @@ if(BUILD_TESTING)
     if(Python3_FOUND)
         add_test(NAME test_metadata_verifier_negative
                  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_verify_diagnostic_metadata.py)
+        add_test(NAME test_acoustic_metrics_suite
+                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_verify_acoustic_metrics.py)
         add_test(NAME test_doc_anchors
                  COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/verify_markdown_anchors.py
                          ${CMAKE_CURRENT_SOURCE_DIR}/DIAGNOSTIC_METADATA_TESTING.md

@@ -404,6 +404,7 @@ struct CliOptions {
     hqrn_cli::WavBitDepth bitDepth{hqrn_cli::WavBitDepth::PCM24};
     size_t blockSize{128};
     std::string diracChannel{"stereo"}; // stereo, left, right
+    std::string metricsJsonFile{""}; // Optional JSON export file
 };
 
 void printHelp() {
@@ -431,6 +432,7 @@ void printHelp() {
               << "  --bitdepth <b>  WAV-Bittiefe: 16, 24, 32f (Standard: 24)\n"
               << "  --simd <path>   SIMD-Pfad erzwingen: auto, avx2, neon, scalar\n"
               << "  --output / -o <file>  Ausgabe-WAV-Dateipfad\n"
+              << "  --metrics-json <file> Akustik-Metriken (EDT, T20, T30) als JSON exportieren\n"
               << "  --input / -i <file>   Eingabe-WAV-Dateipfad (für Mode 'file')\n"
               << "==============================================================================\n";
 }
@@ -451,6 +453,8 @@ int main(int argc, char* argv[]) {
             if (opt.mode == "impulse") opt.mode = "file";
         } else if ((arg == "--output" || arg == "-o") && i + 1 < argc) {
             opt.outputFile = argv[++i];
+        } else if (arg == "--metrics-json" && i + 1 < argc) {
+            opt.metricsJsonFile = argv[++i];
         } else if ((arg == "--sr" || arg == "-s") && i + 1 < argc) {
             opt.sampleRate = std::stof(argv[++i]);
         } else if ((arg == "--len" || arg == "-l") && i + 1 < argc) {
@@ -665,6 +669,37 @@ int main(int argc, char* argv[]) {
               << "  - Rechenzeit:       " << renderTimeMs << " ms\n"
               << "  - Durchsatz:        " << throughputMSamples << " MSamples/s\n"
               << "  - Echtzeit-Faktor:  " << realtimeFactor << "x Realtime\n";
+
+    // 4b. METRIKEN-JSON EXPORT
+    if (!opt.metricsJsonFile.empty()) {
+        std::ofstream jf(opt.metricsJsonFile);
+        if (jf.is_open()) {
+            jf << std::fixed << std::setprecision(4)
+               << "{\n"
+               << "  \"mode\": \"" << opt.mode << "\",\n"
+               << "  \"sample_rate\": " << opt.sampleRate << ",\n"
+               << "  \"duration_sec\": " << audioTimeSec << ",\n"
+               << "  \"t60_target_sec\": " << opt.t60Sec << ",\n"
+               << "  \"fbase_hz\": " << opt.fBaseHz << ",\n"
+               << "  \"peak_l_dbfs\": " << metrics.peakL_dBFS << ",\n"
+               << "  \"peak_r_dbfs\": " << metrics.peakR_dBFS << ",\n"
+               << "  \"rms_l_dbfs\": " << metrics.rmsL_dBFS << ",\n"
+               << "  \"rms_r_dbfs\": " << metrics.rmsR_dBFS << ",\n"
+               << "  \"edt_l_sec\": " << metrics.edtL_sec << ",\n"
+               << "  \"edt_r_sec\": " << metrics.edtR_sec << ",\n"
+               << "  \"t20_l_sec\": " << metrics.t20L_sec << ",\n"
+               << "  \"t20_r_sec\": " << metrics.t20R_sec << ",\n"
+               << "  \"t30_l_sec\": " << metrics.t30L_sec << ",\n"
+               << "  \"t30_r_sec\": " << metrics.t30R_sec << ",\n"
+               << "  \"clipped\": " << (metrics.clipped ? "true" : "false") << ",\n"
+               << "  \"throughput_msamples\": " << throughputMSamples << ",\n"
+               << "  \"realtime_factor\": " << realtimeFactor << "\n"
+               << "}\n";
+            std::cout << "Akustik-Metriken exportiert: " << opt.metricsJsonFile << "\n";
+        } else {
+            std::cerr << "Fehler beim Öffnen der Metrik-JSON-Datei: " << opt.metricsJsonFile << "\n";
+        }
+    }
 
     // 5. WAV-EXPORT
     std::cout << "\nSchreibe WAV-Datei: " << opt.outputFile << "...\n";

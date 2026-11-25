@@ -88,3 +88,8 @@ test-doc-anchors:
 .PHONY: test-fuzz
 test-fuzz:
 	python3 scripts/fuzz_percent_encoding.py --iterations 2000 --verbose
+
+# Acoustic Metrics Plausibility Test Suite
+.PHONY: test-acoustic-metrics
+test-acoustic-metrics:
+	python3 scripts/test_verify_acoustic_metrics.py

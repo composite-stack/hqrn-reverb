@@ -680,7 +680,7 @@ jobs:
       - name: Offline Audio Renderer Smoke Test (Apple Silicon Native WAV Generation)
         run: |
           echo "=== 1. Testing Standalone Renderer via CMake Target ==="
-          ./build_release/hqrn_render --mode impulse --t60 1.5 --fbase 120 --len 0.2 --output macos_smoke_impulse.wav
+          ./build_release/hqrn_render --mode impulse --t60 1.2 --fbase 120 --len 2.0 --output macos_smoke_impulse.wav --metrics-json macos_smoke_metrics.json
           ./build_release/hqrn_render --mode orbit --t60 1.2 --len 0.2 --output macos_smoke_orbit.wav
 
           echo "=== 2. Testing Standalone Renderer via Makefile Target ==="
@@ -699,7 +699,50 @@ jobs:
                   assert w.getframerate() == 48000, f'Expected 48 kHz in {f}'
                   assert w.getnframes() > 0, f'Expected non-empty audio in {f}'
           print('All macOS WAV smoke test outputs validated successfully.')
-          " 
+          "
+
+          echo "=== 4. Acoustic Plausibility Verification (EDT, T20, T30 on Apple Silicon) ==="
+          python3 scripts/verify_acoustic_metrics.py \
+            --metrics-json macos_smoke_metrics.json \
+            --wav macos_smoke_impulse.wav \
+            --target-t60 1.2 \
+            --tolerance 0.15 \
+            --stereo-tolerance 0.15 \
+            --decay-tolerance 0.20
+
+          echo "=== 5. Negative Test & Error Diagnostic Output for Invalid Acoustic Results ==="
+          # Generate an intentionally truncated impulse response (T60=2.5s, length only 0.2s)
+          # to exercise the failure path and verify rich diagnostic reporting.
+          ./build_release/hqrn_render --mode impulse --t60 2.5 --fbase 120 --len 0.2 \
+            --output macos_smoke_invalid_trunc.wav --metrics-json macos_smoke_invalid_trunc.json
+
+          echo "Executing verifier against invalid/truncated decay data (expecting failure exit code 1)..."
+          set +e
+          INVALID_OUT=$(python3 scripts/verify_acoustic_metrics.py \
+            --metrics-json macos_smoke_invalid_trunc.json \
+            --wav macos_smoke_invalid_trunc.wav \
+            --target-t60 2.5 2>&1)
+          VERIFY_RC=$?
+          set -e
+
+          echo "--- DIAGNOSTIC ERROR OUTPUT ON INVALID RESULTS ---"
+          echo "$INVALID_OUT"
+          echo "--- END DIAGNOSTIC ERROR OUTPUT ---"
+
+          if [ $VERIFY_RC -eq 0 ]; then
+            echo "ERROR: Verifier unexpectedly accepted truncated acoustic decay data!"
+            exit 1
+          fi
+
+          if ! echo "$INVALID_OUT" | grep -q "FEHLER: AKUSTISCHE METRIK-PLAUSIBILITÄTSPRÜFUNG FEHLGESCHLAGEN"; then
+            echo "ERROR: Expected diagnostic error headline not found in verifier output!"
+            exit 1
+          fi
+
+          echo "SUCCESS: Verifier correctly rejected invalid acoustic data and produced full diagnostic output."
+
+          echo "=== 6. Running Acoustic Plausibility Unit & Regression Test Suite ==="
+          python3 scripts/test_verify_acoustic_metrics.py
 
       - name: Record Diagnostic Environment & Compiler Metadata
         run: |
@@ -790,6 +833,11 @@ jobs:
         run: |
           echo "=== Executing 15 Automated Negative Inconsistency Test Scenarios ==="
           python3 scripts/test_verify_diagnostic_metadata.py
+
+      - name: Run Acoustic Metrics Plausibility Unit & Invariant Test Suite
+        run: |
+          echo "=== Executing Acoustic Metrics Plausibility Test Suite (EDT, T20, T30) ==="
+          python3 scripts/test_verify_acoustic_metrics.py
 
       - name: Live Negative Test - Inject Corrupted Run Attempt
         env:

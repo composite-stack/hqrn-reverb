@@ -31,6 +31,8 @@ A cutting-edge, resonance-based acoustic reverberation engine formulated in C++2
 ├── scripts/
 │   ├── verify_diagnostic_metadata.py      # CI metadata consistency verifier
 │   ├── test_verify_diagnostic_metadata.py # 15 isolated negative inconsistency test scenarios
+│   ├── verify_acoustic_metrics.py        # Schroeder decay & acoustic plausibility verifier (EDT, T20, T30)
+│   ├── test_verify_acoustic_metrics.py   # Regression and negative injection test suite for acoustic metrics
 │   ├── verify_markdown_anchors.py         # Markdown and Mermaid anchor integrity verifier
 │   ├── test_verify_markdown_anchors.py    # 28 regression & parity unit tests
 │   └── fuzz_percent_encoding.py           # 7-mode property-based fuzzing harness
@@ -67,6 +69,10 @@ make render
 
 # Dynamic Poincaré Disk Orbit Trajectory
 ./hqrn_render --mode orbit --len 6.0 --t60 2.0 -o orbit_trajectory.wav
+
+# Export Acoustic Metrics JSON & Verify EDT, T20, T30 Plausibility
+./hqrn_render --mode impulse --t60 1.2 --len 2.0 -o impulse.wav --metrics-json metrics.json
+python3 scripts/verify_acoustic_metrics.py --metrics-json metrics.json --wav impulse.wav --target-t60 1.2
 ```
 
 ## Quick Start & Testing
@@ -84,6 +90,14 @@ ctest --output-on-failure
 cmake -DCMAKE_BUILD_TYPE=Debug -DENABLE_SANITIZERS=ON ..
 cmake --build .
 ctest --output-on-failure
+```
+
+### Acoustic Metrics Plausibility & Verification
+```bash
+# Run automated acoustic metrics test suite (EDT, T20, T30 validity, tolerances, error output)
+python3 scripts/test_verify_acoustic_metrics.py
+# or via Makefile
+make test-acoustic-metrics
 ```
 
 ### Documentation & Diagnostic Verification
