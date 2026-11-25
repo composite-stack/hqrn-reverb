@@ -24,6 +24,7 @@ A cutting-edge, resonance-based acoustic reverberation engine formulated in C++2
 ├── benchmark_hqrn.cpp            # Engine throughput, latency & allocation benchmarks
 ├── benchmark_vector_paths.cpp    # Comparative SIMD kernel benchmarks
 ├── test_cpu_dispatch.cpp         # Automated test suite for CPU capability dispatch & fallback
+├── hqrn_render.cpp               # C++20 Offline Audio Renderer & Acoustic Analyzer CLI
 ├── DIAGNOSTIC_METADATA_TESTING.md# Comprehensive 5-stage triage guide, Mermaid flow & test matrices
 ├── CMakeLists.txt                # CMake build configuration with ASan/UBSan & benchmark options
 ├── Makefile                      # Quick Makefile for local development and sanitizer runs
@@ -35,6 +36,37 @@ A cutting-edge, resonance-based acoustic reverberation engine formulated in C++2
 │   └── fuzz_percent_encoding.py           # 7-mode property-based fuzzing harness
 └── .github/workflows/
     └── ci.yml                             # Native x86_64, ARM64 & macOS GitHub Actions workflow
+```
+
+
+## Offline Audio Renderer & Acoustic Analyzer CLI (`hqrn_render`)
+
+A standalone CLI utility (`hqrn_render.cpp`) for offline rendering and signal-theoretic validation without external audio framework dependencies:
+
+- **RIFF WAVE Engine**: Reads & writes uncompressed 16-bit, 24-bit PCM and 32-bit float stereo WAV files.
+- **Operating Modes**:
+  - `impulse`: Computes Dirac impulse responses and performs backward Schroeder energy integration ($EDC$, $EDT$, $T_{20}$, $T_{30}$).
+  - `burst`: Generates windowed synthetic noise bursts to analyze onset diffusion and modal dispersion.
+  - `orbit`: Simulates dynamic geodesic sound trajectories on the Poincaré disk ($z_S(t)$ orbit) with hyperbolic metric tracking.
+  - `file`: Offline processes arbitrary stereo/mono WAV input through the HQRN engine.
+- **Acoustic & Performance Telemetry**:
+  - Schroeder decay curve analysis ($EDT$, $T_{20}$, $T_{30}$) for modal decay calibration.
+  - Peak & RMS level measurement in dBFS with True-Peak intervention flags.
+  - High-precision rendering throughput and real-time multiplier ($N \times \text{Realtime}$).
+
+### CLI Examples & Usage
+```bash
+# Compile via Makefile
+make render
+
+# Generate 3.5s Stereo Impulse Response (24-bit / 48 kHz, T60 = 2.2s)
+./hqrn_render --mode impulse --t60 2.2 --fbase 120 --len 3.5 -o impulse.wav
+
+# Process external WAV file with AVX2 SIMD path
+./hqrn_render --mode file --input dry_recording.wav --simd avx2 --mix 0.35 -o wet_mix.wav
+
+# Dynamic Poincaré Disk Orbit Trajectory
+./hqrn_render --mode orbit --len 6.0 --t60 2.0 -o orbit_trajectory.wav
 ```
 
 ## Quick Start & Testing

@@ -13,6 +13,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 option(ENABLE_SANITIZERS "Enable AddressSanitizer (ASan) and UndefinedBehaviorSanitizer (UBSan)" OFF)
 option(ENABLE_BENCHMARKS "Build benchmark targets" OFF)
 option(BUILD_TESTING "Build test targets" ON)
+option(BUILD_RENDERER "Build offline audio renderer CLI target" ON)
 
 include(CheckCXXCompilerFlag)
 include(GNUInstallDirs)
@@ -108,6 +109,24 @@ if(ENABLE_BENCHMARKS)
     target_link_libraries(benchmark_vector_paths PRIVATE hqrn)
     if(SIMD_COMPILE_FLAGS)
         target_compile_options(benchmark_vector_paths PRIVATE ${SIMD_COMPILE_FLAGS})
+    endif()
+endif()
+
+
+# ============================================================================
+# Target 4: Offline Audio Renderer CLI Tool
+# ============================================================================
+if(BUILD_RENDERER)
+    add_executable(hqrn_render hqrn_render.cpp)
+    target_link_libraries(hqrn_render PRIVATE hqrn)
+    if(SIMD_COMPILE_FLAGS)
+        target_compile_options(hqrn_render PRIVATE ${SIMD_COMPILE_FLAGS})
+    endif()
+    install(TARGETS hqrn_render RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+    if(BUILD_TESTING)
+        add_test(NAME test_render_impulse
+                 COMMAND hqrn_render --mode impulse --len 0.1 --output test_render_impulse.wav)
     endif()
 endif()
 

@@ -54,9 +54,24 @@ test-asan-neon: test_cpu_dispatch_neon_asan
 	UBSAN_OPTIONS="halt_on_error=1:abort_on_error=1:print_stacktrace=1" \
 	./test_cpu_dispatch_neon_asan
 
+
+UNAME_M := $(shell uname -m)
+
+# Offline Renderer Target
+.PHONY: render
+render: hqrn_render
+
+hqrn_render: hqrn_render.cpp HQRNKernels.hpp HQRNReverbEngine.hpp
+ifeq ($(UNAME_M),x86_64)
+	$(CXX) $(CXXFLAGS) -mavx2 -mfma hqrn_render.cpp -o hqrn_render
+else
+	$(CXX) $(CXXFLAGS) hqrn_render.cpp -o hqrn_render
+endif
+
 clean:
 	rm -f test_cpu_dispatch test_cpu_dispatch_scalar test_cpu_dispatch_neon \
-	      test_cpu_dispatch_asan test_cpu_dispatch_scalar_asan test_cpu_dispatch_neon_asan
+	      test_cpu_dispatch_asan test_cpu_dispatch_scalar_asan test_cpu_dispatch_neon_asan \
+	      hqrn_render test_render_impulse.wav
 
 # Diagnostic Metadata Verifier Negative Test Suite
 .PHONY: test-metadata-negative
