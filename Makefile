@@ -139,3 +139,21 @@ test-acoustic-metrics:
 .PHONY: test-render-integration
 test-render-integration: render
 	python3 scripts/test_render_metrics_integration.py
+
+# C-API & Wasm Bridge Targets
+test_c_api: test_c_api.cpp hqrn_c_api.cpp hqrn_c_api.h HQRNDawAdapter.hpp HQRNKernels.hpp HQRNReverbEngine.hpp
+	$(CXX) $(CXXFLAGS) -mavx2 -mfma hqrn_c_api.cpp test_c_api.cpp -o test_c_api
+
+test_c_api_scalar: test_c_api.cpp hqrn_c_api.cpp hqrn_c_api.h HQRNDawAdapter.hpp HQRNKernels.hpp HQRNReverbEngine.hpp
+	$(CXX) $(CXXFLAGS) -mno-avx2 -mno-fma -DHQRN_FORCE_SCALAR=1 hqrn_c_api.cpp test_c_api.cpp -o test_c_api_scalar
+
+test_c_api_asan: test_c_api.cpp hqrn_c_api.cpp hqrn_c_api.h HQRNDawAdapter.hpp HQRNKernels.hpp HQRNReverbEngine.hpp
+	$(CXX) $(CXXFLAGS) $(SAN_FLAGS) -mavx2 -mfma hqrn_c_api.cpp test_c_api.cpp -o test_c_api_asan
+
+test-c-api: test_c_api test_c_api_scalar
+	./test_c_api
+	./test_c_api_scalar
+
+# WebAssembly / Emscripten Target
+wasm: hqrn_c_api.cpp hqrn_c_api.h HQRNDawAdapter.hpp HQRNKernels.hpp HQRNReverbEngine.hpp
+	./scripts/build_wasm.sh

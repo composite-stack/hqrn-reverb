@@ -48,3 +48,8 @@ test_*.json
 macos_smoke_*.json
 smoke_*.json
 ctest_*.json
+test_c_api
+test_c_api_scalar
+test_c_api_asan
+test_c_api_neon
+test_c_api_neon_asan
