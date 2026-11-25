@@ -129,6 +129,13 @@ if(BUILD_RENDERER)
     if(BUILD_TESTING)
         add_test(NAME test_render_impulse
                  COMMAND hqrn_render --mode impulse --len 0.1 --output test_render_impulse.wav)
+        if(Python3_FOUND)
+            add_test(NAME test_render_metrics_integration
+                     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/scripts/test_render_metrics_integration.py)
+            set_tests_properties(test_render_metrics_integration PROPERTIES
+                ENVIRONMENT "HQRN_RENDER_BIN=$<TARGET_FILE:hqrn_render>"
+            )
+        endif()
     endif()
 endif()
 

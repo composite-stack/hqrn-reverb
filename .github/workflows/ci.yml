@@ -744,6 +744,9 @@ jobs:
           echo "=== 6. Running Acoustic Plausibility Unit & Regression Test Suite ==="
           python3 scripts/test_verify_acoustic_metrics.py
 
+          echo "=== 7. Running Renderer Metrics Integration Test Suite ==="
+          HQRN_RENDER_BIN=./build_release/hqrn_render python3 scripts/test_render_metrics_integration.py
+
       - name: Record Diagnostic Environment & Compiler Metadata
         run: |
           {
@@ -838,6 +841,12 @@ jobs:
         run: |
           echo "=== Executing Acoustic Metrics Plausibility Test Suite (EDT, T20, T30) ==="
           python3 scripts/test_verify_acoustic_metrics.py
+
+      - name: Run Renderer Metrics & Acoustic Verifier End-to-End Integration Test Suite
+        run: |
+          echo "=== Building Renderer and Executing End-to-End Integration Tests ==="
+          make render
+          python3 scripts/test_render_metrics_integration.py
 
       - name: Live Negative Test - Inject Corrupted Run Attempt
         env:

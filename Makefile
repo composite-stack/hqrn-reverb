@@ -93,3 +93,8 @@ test-fuzz:
 .PHONY: test-acoustic-metrics
 test-acoustic-metrics:
 	python3 scripts/test_verify_acoustic_metrics.py
+
+# End-to-End Integration Tests (Renderer --metrics-json + Acoustic Verifier)
+.PHONY: test-render-integration
+test-render-integration: render
+	python3 scripts/test_render_metrics_integration.py
