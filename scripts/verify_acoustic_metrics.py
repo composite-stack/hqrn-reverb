@@ -138,6 +138,9 @@ def read_wav_stereo(path: str) -> Tuple[List[float], List[float], int, float]:
 
     return left, right, sample_rate, duration_sec
 
+# Numerical tolerance epsilon to guard against IEEE 754 floating point representation artifacts at exact boundaries
+FLOAT_TOL_EPS = 1e-9
+
 def verify_plausibility(
     metrics: Dict[str, Any],
     target_t60: float,
@@ -205,7 +208,7 @@ def verify_plausibility(
         rel_err = (val - target_t60) / target_t60
         pct_err = rel_err * 100.0
         deviations[key] = pct_err
-        if abs(rel_err) > tolerance:
+        if abs(rel_err) > (tolerance + FLOAT_TOL_EPS):
             violations.append(
                 f"{name} ({val:.3f} s) weicht um {pct_err:+.1f}% vom Zielwert T60 ({target_t60:.3f} s) ab "
                 f"(zulässige Toleranz: ±{tolerance * 100:.1f}%)."
@@ -218,7 +221,7 @@ def verify_plausibility(
         if denom > 1e-6:
             diff_rel = abs(val_l - val_r) / denom
             details[f"sym_{label.lower()}"] = diff_rel * 100.0
-            if diff_rel > stereo_tolerance:
+            if diff_rel > (stereo_tolerance + FLOAT_TOL_EPS):
                 violations.append(
                     f"Stereo-Asymmetrie bei {label}: L={val_l:.3f} s, R={val_r:.3f} s "
                     f"ergibt {diff_rel * 100.0:.1f}% Differenz (zulässig: <= {stereo_tolerance * 100:.1f}%)."
@@ -232,14 +235,14 @@ def verify_plausibility(
     def check_decay_curve(edt: float, t20: float, t30: float, ch_name: str):
         # EDT should not wildly differ from T20
         diff_edt_t20 = abs(edt - t20) / t20
-        if diff_edt_t20 > decay_tolerance:
+        if diff_edt_t20 > (decay_tolerance + FLOAT_TOL_EPS):
             violations.append(
                 f"Inkonsistente Abklingkurve {ch_name}: Diskrepanz zwischen EDT ({edt:.3f} s) und T20 ({t20:.3f} s) "
                 f"beträgt {diff_edt_t20 * 100.0:.1f}% (zulässig: <= {decay_tolerance * 100:.1f}%)."
             )
         # T20 should not wildly differ from T30
         diff_t20_t30 = abs(t20 - t30) / t30
-        if diff_t20_t30 > decay_tolerance:
+        if diff_t20_t30 > (decay_tolerance + FLOAT_TOL_EPS):
             violations.append(
                 f"Inkonsistente Abklingkurve {ch_name}: Diskrepanz zwischen T20 ({t20:.3f} s) und T30 ({t30:.3f} s) "
                 f"beträgt {diff_t20_t30 * 100.0:.1f}% (zulässig: <= {decay_tolerance * 100:.1f}%)."
@@ -295,7 +298,7 @@ def format_invalid_report(
         else:
             dev_l = devs.get(dev_l_key, 0.0)
             dev_l_txt = f"{dev_l:+6.1f}%"
-            stat_l = "GÜLTIG   " if abs(dev_l) <= tol else "ABWEICHUNG"
+            stat_l = "GÜLTIG   " if abs(dev_l) <= (tol + 1e-7) else "ABWEICHUNG"
             txt_l = f"{val_l:7.3f} s"
 
         # status R
@@ -306,7 +309,7 @@ def format_invalid_report(
         else:
             dev_r = devs.get(dev_r_key, 0.0)
             dev_r_txt = f"{dev_r:+6.1f}%"
-            stat_r = "GÜLTIG   " if abs(dev_r) <= tol else "ABWEICHUNG"
+            stat_r = "GÜLTIG   " if abs(dev_r) <= (tol + 1e-7) else "ABWEICHUNG"
             txt_r = f"{val_r:7.3f} s"
 
         return f"  {label:<8} {txt_l}    {dev_l_txt:<8}  {stat_l:<10}  {txt_r}    {dev_r_txt:<8}  {stat_r}"
