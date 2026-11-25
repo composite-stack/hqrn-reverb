@@ -445,9 +445,9 @@ class TestRenderMetricsIntegration(unittest.TestCase):
         self.assertAlmostEqual(d_auto["rms_l_dbfs"], d_scalar["rms_l_dbfs"], delta=0.05)
 
     def test_15_nonexistent_directory_error_resilience(self):
-        """Verifies that providing an unwritable/nonexistent directory for --metrics-json fails gracefully."""
+        """Verifies that providing a nonexistent directory for --metrics-json fails with exit code 1 and error msg."""
         bad_json = os.path.join(self.tmp_dir.name, "nonexistent_subfolder", "metrics.json")
-        wav_path = os.path.join(self.tmp_dir.name, "out.wav")
+        wav_path = os.path.join(self.tmp_dir.name, "out_15.wav")
         cmd = [
             self.renderer_bin,
             "--mode", "impulse",
@@ -456,8 +456,177 @@ class TestRenderMetricsIntegration(unittest.TestCase):
             "--metrics-json", bad_json
         ]
         res = subprocess.run(cmd, capture_output=True, text=True)
-        # Renderer should print error message to stderr regarding JSON open failure
-        self.assertIn("Fehler beim Öffnen der Metrik-JSON-Datei", res.stderr)
+        self.assertEqual(res.returncode, 1, f"Expected exit code 1 for nonexistent directory, got {res.returncode}")
+        self.assertIn("Fehler beim Öffnen der Metrik-JSON-Datei: " + bad_json, res.stderr)
+        self.assertFalse(os.path.isfile(bad_json))
+        self.assertFalse(os.path.isfile(wav_path), "WAV file should not be generated if metrics export fails")
+
+    def test_16_metrics_json_path_is_existing_directory(self):
+        """Verifies that passing an existing directory path to --metrics-json fails with exit code 1."""
+        dir_as_path = os.path.join(self.tmp_dir.name, "dir_target")
+        os.makedirs(dir_as_path, exist_ok=True)
+        wav_path = os.path.join(self.tmp_dir.name, "out_16.wav")
+        cmd = [
+            self.renderer_bin,
+            "--mode", "impulse",
+            "--len", "0.1",
+            "-o", wav_path,
+            "--metrics-json", dir_as_path
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 1, f"Expected exit code 1 when path is a directory, got {res.returncode}")
+        self.assertIn("Fehler beim Öffnen der Metrik-JSON-Datei: " + dir_as_path, res.stderr)
+        self.assertFalse(os.path.isfile(wav_path))
+
+    def test_17_metrics_json_parent_is_regular_file(self):
+        """Verifies that passing a path whose parent component is a file (ENOTDIR) fails with exit code 1."""
+        file_parent = os.path.join(self.tmp_dir.name, "dummy_parent.txt")
+        with open(file_parent, "w", encoding="utf-8") as f:
+            f.write("not a directory")
+        bad_json = os.path.join(file_parent, "metrics.json")
+        wav_path = os.path.join(self.tmp_dir.name, "out_17.wav")
+        cmd = [
+            self.renderer_bin,
+            "--mode", "impulse",
+            "--len", "0.1",
+            "-o", wav_path,
+            "--metrics-json", bad_json
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 1, f"Expected exit code 1 for ENOTDIR, got {res.returncode}")
+        self.assertIn("Fehler beim Öffnen der Metrik-JSON-Datei: " + bad_json, res.stderr)
+        self.assertFalse(os.path.isfile(bad_json))
+        self.assertFalse(os.path.isfile(wav_path))
+
+    def test_18_metrics_json_unwritable_directory_permission_denied(self):
+        """Verifies that an unwritable directory (chmod 0555) fails with exit code 1 and error message."""
+        ro_dir = os.path.join(self.tmp_dir.name, "readonly_dir")
+        os.makedirs(ro_dir, mode=0o777, exist_ok=True)
+        os.chmod(self.tmp_dir.name, 0o777)
+        os.chmod(ro_dir, 0o555)
+        bad_json = os.path.join(ro_dir, "metrics.json")
+        wav_path = os.path.join(self.tmp_dir.name, "out_18.wav")
+        cmd = [
+            self.renderer_bin,
+            "--mode", "impulse",
+            "--len", "0.1",
+            "-o", wav_path,
+            "--metrics-json", bad_json
+        ]
+
+        kwargs = {}
+        if os.geteuid() == 0:
+            import pwd
+            try:
+                u = pwd.getpwnam("lovable") if "lovable" in [p.pw_name for p in pwd.getpwall()] else None
+                if u:
+                    kwargs["user"] = u.pw_uid
+                    kwargs["group"] = u.pw_gid
+            except Exception:
+                pass
+
+        if "user" not in kwargs and os.geteuid() == 0:
+            for ro_fs_candidate in ["/sys/kernel/hqrn_metrics.json", "/proc/hqrn_metrics.json"]:
+                if os.path.exists(os.path.dirname(ro_fs_candidate)):
+                    bad_json = ro_fs_candidate
+                    cmd = [
+                        self.renderer_bin,
+                        "--mode", "impulse",
+                        "--len", "0.1",
+                        "-o", wav_path,
+                        "--metrics-json", bad_json
+                    ]
+                    break
+
+        res = subprocess.run(cmd, capture_output=True, text=True, **kwargs)
+        self.assertEqual(res.returncode, 1, f"Expected exit code 1 for unwritable path, got {res.returncode}. stderr={res.stderr}")
+        self.assertIn("Fehler beim Öffnen der Metrik-JSON-Datei: " + bad_json, res.stderr)
+        self.assertFalse(os.path.isfile(bad_json))
+        self.assertFalse(os.path.isfile(wav_path))
+
+    def test_19_metrics_json_unwritable_existing_file_permission_denied(self):
+        """Verifies that overwriting a read-only existing file (chmod 0444) fails with exit code 1."""
+        rw_dir = os.path.join(self.tmp_dir.name, "rw_dir")
+        os.makedirs(rw_dir, mode=0o777, exist_ok=True)
+        os.chmod(self.tmp_dir.name, 0o777)
+        ro_file = os.path.join(rw_dir, "readonly_file.json")
+        with open(ro_file, "w", encoding="utf-8") as f:
+            f.write("{}")
+        os.chmod(ro_file, 0o444)
+        wav_path = os.path.join(self.tmp_dir.name, "out_19.wav")
+
+        cmd = [
+            self.renderer_bin,
+            "--mode", "impulse",
+            "--len", "0.1",
+            "-o", wav_path,
+            "--metrics-json", ro_file
+        ]
+
+        kwargs = {}
+        if os.geteuid() == 0:
+            import pwd
+            try:
+                u = pwd.getpwnam("lovable") if "lovable" in [p.pw_name for p in pwd.getpwall()] else None
+                if u:
+                    kwargs["user"] = u.pw_uid
+                    kwargs["group"] = u.pw_gid
+            except Exception:
+                pass
+
+        if "user" not in kwargs and os.geteuid() == 0:
+            for ro_fs_candidate in ["/sys/kernel/profiling", "/proc/version"]:
+                if os.path.isfile(ro_fs_candidate):
+                    ro_file = ro_fs_candidate
+                    cmd = [
+                        self.renderer_bin,
+                        "--mode", "impulse",
+                        "--len", "0.1",
+                        "-o", wav_path,
+                        "--metrics-json", ro_file
+                    ]
+                    break
+
+        res = subprocess.run(cmd, capture_output=True, text=True, **kwargs)
+        self.assertEqual(res.returncode, 1, f"Expected exit code 1 for read-only file, got {res.returncode}")
+        self.assertIn("Fehler beim Öffnen der Metrik-JSON-Datei: " + ro_file, res.stderr)
+
+    def test_20_metrics_json_missing_argument_cli_syntax_error(self):
+        """Verifies that omitting the path argument to --metrics-json yields exit code 1 and usage error."""
+        # Case A: --metrics-json is the very last argument
+        cmd_a = [
+            self.renderer_bin,
+            "--mode", "impulse",
+            "--len", "0.1",
+            "--metrics-json"
+        ]
+        res_a = subprocess.run(cmd_a, capture_output=True, text=True)
+        self.assertEqual(res_a.returncode, 1)
+        self.assertIn("Fehler: --metrics-json erfordert einen Dateipfad als Argument", res_a.stderr)
+
+        # Case B: --metrics-json is followed immediately by another option flag
+        cmd_b = [
+            self.renderer_bin,
+            "--mode", "impulse",
+            "--metrics-json",
+            "--sr", "44100"
+        ]
+        res_b = subprocess.run(cmd_b, capture_output=True, text=True)
+        self.assertEqual(res_b.returncode, 1)
+        self.assertIn("Fehler: --metrics-json erfordert einen Dateipfad als Argument", res_b.stderr)
+
+    def test_21_metrics_json_empty_path_error(self):
+        """Verifies that passing an empty string as --metrics-json path fails with exit code 1."""
+        cmd = [
+            self.renderer_bin,
+            "--mode", "impulse",
+            "--len", "0.1",
+            "-o", os.path.join(self.tmp_dir.name, "out_21.wav"),
+            "--metrics-json", ""
+        ]
+        res = subprocess.run(cmd, capture_output=True, text=True)
+        self.assertEqual(res.returncode, 1)
+        self.assertIn("Fehler: --metrics-json darf kein leerer Pfad sein", res.stderr)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

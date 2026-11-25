@@ -453,8 +453,17 @@ int main(int argc, char* argv[]) {
             if (opt.mode == "impulse") opt.mode = "file";
         } else if ((arg == "--output" || arg == "-o") && i + 1 < argc) {
             opt.outputFile = argv[++i];
-        } else if (arg == "--metrics-json" && i + 1 < argc) {
-            opt.metricsJsonFile = argv[++i];
+        } else if (arg == "--metrics-json") {
+            if (i + 1 < argc && (argv[i + 1][0] != '-' || std::string(argv[i + 1]).find(".json") != std::string::npos)) {
+                opt.metricsJsonFile = argv[++i];
+                if (opt.metricsJsonFile.empty()) {
+                    std::cerr << "Fehler: --metrics-json darf kein leerer Pfad sein\n";
+                    return 1;
+                }
+            } else {
+                std::cerr << "Fehler: --metrics-json erfordert einen Dateipfad als Argument\n";
+                return 1;
+            }
         } else if ((arg == "--sr" || arg == "-s") && i + 1 < argc) {
             opt.sampleRate = std::stof(argv[++i]);
         } else if ((arg == "--len" || arg == "-l") && i + 1 < argc) {
@@ -673,32 +682,37 @@ int main(int argc, char* argv[]) {
     // 4b. METRIKEN-JSON EXPORT
     if (!opt.metricsJsonFile.empty()) {
         std::ofstream jf(opt.metricsJsonFile);
-        if (jf.is_open()) {
-            jf << std::fixed << std::setprecision(4)
-               << "{\n"
-               << "  \"mode\": \"" << opt.mode << "\",\n"
-               << "  \"sample_rate\": " << opt.sampleRate << ",\n"
-               << "  \"duration_sec\": " << audioTimeSec << ",\n"
-               << "  \"t60_target_sec\": " << opt.t60Sec << ",\n"
-               << "  \"fbase_hz\": " << opt.fBaseHz << ",\n"
-               << "  \"peak_l_dbfs\": " << metrics.peakL_dBFS << ",\n"
-               << "  \"peak_r_dbfs\": " << metrics.peakR_dBFS << ",\n"
-               << "  \"rms_l_dbfs\": " << metrics.rmsL_dBFS << ",\n"
-               << "  \"rms_r_dbfs\": " << metrics.rmsR_dBFS << ",\n"
-               << "  \"edt_l_sec\": " << metrics.edtL_sec << ",\n"
-               << "  \"edt_r_sec\": " << metrics.edtR_sec << ",\n"
-               << "  \"t20_l_sec\": " << metrics.t20L_sec << ",\n"
-               << "  \"t20_r_sec\": " << metrics.t20R_sec << ",\n"
-               << "  \"t30_l_sec\": " << metrics.t30L_sec << ",\n"
-               << "  \"t30_r_sec\": " << metrics.t30R_sec << ",\n"
-               << "  \"clipped\": " << (metrics.clipped ? "true" : "false") << ",\n"
-               << "  \"throughput_msamples\": " << throughputMSamples << ",\n"
-               << "  \"realtime_factor\": " << realtimeFactor << "\n"
-               << "}\n";
-            std::cout << "Akustik-Metriken exportiert: " << opt.metricsJsonFile << "\n";
-        } else {
+        if (!jf.is_open()) {
             std::cerr << "Fehler beim Öffnen der Metrik-JSON-Datei: " << opt.metricsJsonFile << "\n";
+            return 1;
         }
+        jf << std::fixed << std::setprecision(4)
+           << "{\n"
+           << "  \"mode\": \"" << opt.mode << "\",\n"
+           << "  \"sample_rate\": " << opt.sampleRate << ",\n"
+           << "  \"duration_sec\": " << audioTimeSec << ",\n"
+           << "  \"t60_target_sec\": " << opt.t60Sec << ",\n"
+           << "  \"fbase_hz\": " << opt.fBaseHz << ",\n"
+           << "  \"peak_l_dbfs\": " << metrics.peakL_dBFS << ",\n"
+           << "  \"peak_r_dbfs\": " << metrics.peakR_dBFS << ",\n"
+           << "  \"rms_l_dbfs\": " << metrics.rmsL_dBFS << ",\n"
+           << "  \"rms_r_dbfs\": " << metrics.rmsR_dBFS << ",\n"
+           << "  \"edt_l_sec\": " << metrics.edtL_sec << ",\n"
+           << "  \"edt_r_sec\": " << metrics.edtR_sec << ",\n"
+           << "  \"t20_l_sec\": " << metrics.t20L_sec << ",\n"
+           << "  \"t20_r_sec\": " << metrics.t20R_sec << ",\n"
+           << "  \"t30_l_sec\": " << metrics.t30L_sec << ",\n"
+           << "  \"t30_r_sec\": " << metrics.t30R_sec << ",\n"
+           << "  \"clipped\": " << (metrics.clipped ? "true" : "false") << ",\n"
+           << "  \"throughput_msamples\": " << throughputMSamples << ",\n"
+           << "  \"realtime_factor\": " << realtimeFactor << "\n"
+           << "}\n";
+        jf.flush();
+        if (!jf.good()) {
+            std::cerr << "Fehler beim Schreiben der Metrik-JSON-Datei: " << opt.metricsJsonFile << "\n";
+            return 1;
+        }
+        std::cout << "Akustik-Metriken exportiert: " << opt.metricsJsonFile << "\n";
     }
 
     // 5. WAV-EXPORT
