@@ -347,6 +347,7 @@ public:
     void prepare(float sampleRate) noexcept {
         sampleRate_ = sampleRate;
         reset();
+        setCouplingPhase(couplingTheta_);
         updateModes();
         updateSourceInjection();
         updateListenerExtraction();
@@ -373,6 +374,41 @@ public:
         updateSourceInjection();
     }
 
+    void setCouplingPhase(float thetaRad) noexcept {
+        couplingTheta_ = thetaRad;
+        float cosT = std::cos(thetaRad);
+        float sinT = std::sin(thetaRad);
+        // M = P+ + e^{i theta} P- = (1+e^{ith})/2 I + (1-e^{ith})/2 H
+        couplingAr_ = 0.5f * (1.0f + cosT);
+        couplingAi_ = 0.5f * sinT;
+        couplingBr_ = 0.5f * (1.0f - cosT);
+        couplingBi_ = -0.5f * sinT;
+    }
+
+    [[nodiscard]] float getCouplingPhase() const noexcept {
+        return couplingTheta_;
+    }
+
+    void getModeEnergies(float* outEnergies) const noexcept {
+        if (outEnergies == nullptr) return;
+        for (int u = 0; u < 16; ++u) {
+            outEnergies[u] = q_[u] * q_[u] + p_[u] * p_[u];
+        }
+    }
+
+    [[nodiscard]] float getModeEnergy(size_t u) const noexcept {
+        if (u >= 16) return 0.0f;
+        return q_[u] * q_[u] + p_[u] * p_[u];
+    }
+
+    [[nodiscard]] float getGrad() const noexcept {
+        return gRad_;
+    }
+
+    [[nodiscard]] float getSourceListenerDistance() const noexcept {
+        return hyperbolicDistance(sourcePos_, listenerPos_);
+    }
+
     void setListenerPosition(DiskPoint zL, float headingRad = 0.0f) noexcept {
         listenerPos_ = zL.clamped(0.95f);
         listenerHeading_ = headingRad;
@@ -396,9 +432,20 @@ public:
             p_[u] = damp * pRot;
         }
 
-        // 2. Unitäre Hadamard-Kopplung: K = H_4 (x) I_2
-        fwht16(q_.data());
-        fwht16(p_.data());
+        // 2. Unitäre Hadamard-/Phasen-Kopplung: M(theta) = P+ + e^{i theta} P-
+        std::array<float, 16> hq = q_;
+        std::array<float, 16> hp = p_;
+        fwht16(hq.data());
+        fwht16(hp.data());
+
+        for (int u = 0; u < 16; ++u) {
+            float qu = q_[u];
+            float pu = p_[u];
+            float hqu = hq[u];
+            float hpu = hp[u];
+            q_[u] = couplingAr_ * qu - couplingAi_ * pu + couplingBr_ * hqu - couplingBi_ * hpu;
+            p_[u] = couplingAi_ * qu + couplingAr_ * pu + couplingBi_ * hqu + couplingBr_ * hpu;
+        }
 
         // 3. Audio-Injektion B(z_S) in Impulskoordinaten p_u
         for (int u = 0; u < 16; ++u) {
@@ -482,6 +529,7 @@ private:
 
         // Modendichte-Eichung (Weg A): g_rad = sqrt(32 * (1 - meanGammaSq_))
         float gRad = std::sqrt(std::max(1e-6f, 32.0f * (1.0f - meanGammaSq_)));
+        gRad_ = gRad;
 
         for (int u = 0; u < 16; ++u) {
             float vNorm = rawV[u] * normV;
@@ -502,6 +550,13 @@ private:
     DiskPoint sourcePos_{0.0f, 0.0f};
     DiskPoint listenerPos_{0.0f, 0.0f};
     float listenerHeading_{0.0f};
+
+    float couplingTheta_{pi_v<float>};
+    float couplingAr_{0.0f};
+    float couplingAi_{0.0f};
+    float couplingBr_{1.0f};
+    float couplingBi_{0.0f};
+    float gRad_{1.0f};
 
     const std::array<DiskPoint, 16> nodes_;
 
@@ -547,6 +602,13 @@ public:
     void setListenerPosition(float x, float y, float headingRad = 0.0f) noexcept {
         kernel_.setListenerPosition({x, y}, headingRad);
     }
+
+    void setCouplingPhase(float thetaRad) noexcept { kernel_.setCouplingPhase(thetaRad); }
+    [[nodiscard]] float getCouplingPhase() const noexcept { return kernel_.getCouplingPhase(); }
+    void getModeEnergies(float* outEnergies) const noexcept { kernel_.getModeEnergies(outEnergies); }
+    [[nodiscard]] float getModeEnergy(size_t u) const noexcept { return kernel_.getModeEnergy(u); }
+    [[nodiscard]] float getGrad() const noexcept { return kernel_.getGrad(); }
+    [[nodiscard]] float getSourceListenerDistance() const noexcept { return kernel_.getSourceListenerDistance(); }
 
     void setMix(float wetRatio) noexcept { wetRatio_ = std::clamp(wetRatio, 0.0f, 1.0f); }
     void setOutputGainDb(float gainDb) noexcept { outputGain_ = std::pow(10.0f, gainDb / 20.0f); }

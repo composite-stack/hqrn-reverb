@@ -79,6 +79,8 @@ struct HQRNContext {
     SmoothedParam reverbTime{2.0f, 2.0f, 1.0f};
     SmoothedParam baseFreq{100.0f, 100.0f, 1.0f};
     SmoothedParam mix{0.35f, 0.35f, 1.0f};
+    SmoothedParam couplingTheta{dsp::hqrn::pi_v<float>, dsp::hqrn::pi_v<float>, 1.0f};
+    std::array<float, 16> modeEnergies{};
 
     HQRNContext(double sr, uint32_t maxBlock, uint32_t quantum)
         : adapter(dsp::hqrn::DawAdapterMode::QuantizedFifo, quantum),
@@ -129,6 +131,9 @@ struct HQRNContext {
         if (mix.step()) {
             adapter.setMix(mix.current);
         }
+        if (couplingTheta.step()) {
+            adapter.setCouplingPhase(couplingTheta.current);
+        }
     }
 };
 
@@ -167,6 +172,7 @@ HQRN_EXPORT void hqrn_prepare(HQRNHandle handle, double sampleRate, uint32_t max
 HQRN_EXPORT void hqrn_reset(HQRNHandle handle) {
     if (auto* ctx = asContext(handle)) {
         ctx->adapter.reset();
+        ctx->modeEnergies.fill(0.0f);
     }
 }
 
@@ -225,7 +231,10 @@ HQRN_EXPORT void hqrn_process(HQRNHandle handle, uint32_t numFrames) {
         if (numFrames == 0) return;
         uint32_t n = std::min(numFrames, ctx->maxBlockSize);
         ctx->updateSmoothing();
-        const float* inPtrs[2] = { ctx->inputL.data(), ctx->inputR.data() }; float* outPtrs[2] = { ctx->outputL.data(), ctx->outputR.data() }; ctx->adapter.process(inPtrs, outPtrs, n, 2, 2);
+        const float* inPtrs[2] = { ctx->inputL.data(), ctx->inputR.data() };
+        float* outPtrs[2] = { ctx->outputL.data(), ctx->outputR.data() };
+        ctx->adapter.process(inPtrs, outPtrs, n, 2, 2);
+        ctx->adapter.getModeEnergies(ctx->modeEnergies.data());
     }
 }
 
@@ -239,6 +248,7 @@ HQRN_EXPORT void hqrn_process_planar(HQRNHandle handle,
         const float* inPtrs[2] = { inL, inR };
         float* outPtrs[2] = { outL, outR };
         ctx->adapter.process(inPtrs, outPtrs, numFrames, 2, 2);
+        ctx->adapter.getModeEnergies(ctx->modeEnergies.data());
     }
 }
 
@@ -250,6 +260,7 @@ HQRN_EXPORT void hqrn_process_interleaved(HQRNHandle handle,
         if (numFrames == 0) return;
         ctx->updateSmoothing();
         ctx->adapter.processInterleaved(inInterleaved, outInterleaved, numFrames);
+        ctx->adapter.getModeEnergies(ctx->modeEnergies.data());
     }
 }
 
@@ -303,6 +314,28 @@ HQRN_EXPORT void hqrn_set_clipper_params(HQRNHandle handle, float ceilingDb, flo
     }
 }
 
+HQRN_EXPORT void hqrn_set_coupling_phase(HQRNHandle handle, float thetaRad) {
+    if (auto* ctx = asContext(handle)) {
+        ctx->couplingTheta.setImmediate(thetaRad);
+        ctx->adapter.setCouplingPhase(thetaRad);
+    }
+}
+
+HQRN_EXPORT void hqrn_set_coupling_theta(HQRNHandle handle, float thetaRad) {
+    hqrn_set_coupling_phase(handle, thetaRad);
+}
+
+HQRN_EXPORT float hqrn_get_coupling_phase(HQRNHandle handle) {
+    if (auto* ctx = asContext(handle)) {
+        return ctx->couplingTheta.current;
+    }
+    return 0.0f;
+}
+
+HQRN_EXPORT float hqrn_get_coupling_theta(HQRNHandle handle) {
+    return hqrn_get_coupling_phase(handle);
+}
+
 HQRN_EXPORT void hqrn_set_source_target(HQRNHandle handle, float targetX, float targetY, float smoothTimeSec) {
     if (auto* ctx = asContext(handle)) {
         ctx->sourceX.setTarget(targetX, smoothTimeSec, ctx->sampleRate, ctx->maxBlockSize);
@@ -336,6 +369,16 @@ HQRN_EXPORT void hqrn_set_mix_target(HQRNHandle handle, float targetWetRatio, fl
     }
 }
 
+HQRN_EXPORT void hqrn_set_coupling_phase_target(HQRNHandle handle, float targetThetaRad, float smoothTimeSec) {
+    if (auto* ctx = asContext(handle)) {
+        ctx->couplingTheta.setTarget(targetThetaRad, smoothTimeSec, ctx->sampleRate, ctx->maxBlockSize);
+    }
+}
+
+HQRN_EXPORT void hqrn_set_coupling_theta_target(HQRNHandle handle, float targetThetaRad, float smoothTimeSec) {
+    hqrn_set_coupling_phase_target(handle, targetThetaRad, smoothTimeSec);
+}
+
 HQRN_EXPORT uint32_t hqrn_get_latency_samples(HQRNHandle handle) {
     if (const auto* ctx = asContext(handle)) {
         return static_cast<uint32_t>(ctx->adapter.getLatencySamples());
@@ -346,6 +389,44 @@ HQRN_EXPORT uint32_t hqrn_get_latency_samples(HQRNHandle handle) {
 HQRN_EXPORT float hqrn_get_sample_rate(HQRNHandle handle) {
     if (const auto* ctx = asContext(handle)) {
         return ctx->sampleRate;
+    }
+    return 0.0f;
+}
+
+HQRN_EXPORT void hqrn_get_mode_energies(HQRNHandle handle, float* outEnergies) {
+    if (auto* ctx = asContext(handle)) {
+        if (outEnergies != nullptr) {
+            std::copy(ctx->modeEnergies.begin(), ctx->modeEnergies.end(), outEnergies);
+        }
+    }
+}
+
+HQRN_EXPORT const float* hqrn_get_mode_energies_ptr(HQRNHandle handle) {
+    if (auto* ctx = asContext(handle)) {
+        return ctx->modeEnergies.data();
+    }
+    return nullptr;
+}
+
+HQRN_EXPORT float hqrn_get_mode_energy(HQRNHandle handle, uint32_t modeIndex) {
+    if (auto* ctx = asContext(handle)) {
+        if (modeIndex < 16) {
+            return ctx->modeEnergies[modeIndex];
+        }
+    }
+    return 0.0f;
+}
+
+HQRN_EXPORT float hqrn_get_grad(HQRNHandle handle) {
+    if (auto* ctx = asContext(handle)) {
+        return ctx->adapter.getGrad();
+    }
+    return 1.0f;
+}
+
+HQRN_EXPORT float hqrn_get_source_listener_distance(HQRNHandle handle) {
+    if (auto* ctx = asContext(handle)) {
+        return ctx->adapter.getSourceListenerDistance();
     }
     return 0.0f;
 }

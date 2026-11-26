@@ -437,6 +437,12 @@ public:
     void setListenerPosition(float x, float y, float headingRad = 0.0f) noexcept {
         engine_.setListenerPosition(x, y, headingRad);
     }
+    void setCouplingPhase(float thetaRad) noexcept { engine_.setCouplingPhase(thetaRad); }
+    [[nodiscard]] float getCouplingPhase() const noexcept { return engine_.getCouplingPhase(); }
+    void getModeEnergies(float* outEnergies) const noexcept { engine_.getModeEnergies(outEnergies); }
+    [[nodiscard]] float getModeEnergy(size_t u) const noexcept { return engine_.getModeEnergy(u); }
+    [[nodiscard]] float getGrad() const noexcept { return engine_.getGrad(); }
+    [[nodiscard]] float getSourceListenerDistance() const noexcept { return engine_.getSourceListenerDistance(); }
     void setMix(float wetRatio) noexcept { engine_.setMix(wetRatio); }
     void setOutputGainDb(float gainDb) noexcept { engine_.setOutputGainDb(gainDb); }
     void setClipperParams(float ceilingDb, float kneeDb = 3.0f, bool enable = true) noexcept {

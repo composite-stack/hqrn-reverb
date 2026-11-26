@@ -188,7 +188,7 @@ void testParametersAndSmoothing() {
     hqrn_set_listener_target(handle, -0.5f, -0.2f, 1.57f, 0.05f);
 
     // Simuliere 30 AudioWorklet-Blöcke à 128 Samples (~80 ms)
-    for (int i = 0; i < 30; ++i) {
+    for (int i = 0; i < 60; ++i) {
         hqrn_process(handle, 128);
     }
     reportTest("Smoothed Parameter-Updates konvergieren stabil ohne Artefakte", true);
@@ -269,6 +269,93 @@ void testRealTimeZeroAllocations() {
     hqrn_destroy(handle);
 }
 
+
+void testCouplingAndModeEnergies() {
+    std::cout << "\n--- Test 8: Modenenergien & Kopplungsphasenwinkel theta ---\n";
+
+    HQRNHandle handle = hqrn_create(48000.0, 128, 128);
+
+    // Initialwerte pruefen
+    float initialTheta = hqrn_get_coupling_phase(handle);
+    reportTest("Standard-Kopplungswinkel ist pi (FWHT)", std::abs(initialTheta - 3.14159265f) < 1e-4f);
+
+    // Initial sind die Energien 0
+    std::vector<float> energies(16, 0.0f);
+    hqrn_get_mode_energies(handle, energies.data());
+    float sumInitEnergy = 0.0f;
+    for (float e : energies) sumInitEnergy += e;
+    reportTest("Initiale Modenenergien sind 0", sumInitEnergy == 0.0f);
+
+    // Getter-Zeiger auf internen Speicher pruefen
+    const float* ePtr = hqrn_get_mode_energies_ptr(handle);
+    reportTest("Mode-Energies Zeiger ist nicht null", ePtr != nullptr);
+
+    // Delta-Impuls einspeisen
+    float* inL = hqrn_get_input_buffer_l(handle);
+    inL[0] = 1.0f;
+    hqrn_process(handle, 128);
+
+    // Nach Impuls muessen Modenenergien angeregt und positiv sein
+    hqrn_get_mode_energies(handle, energies.data());
+    float sumImpulseEnergy = 0.0f;
+    bool allFiniteAndNonNegative = true;
+    for (size_t u = 0; u < 16; ++u) {
+        if (!std::isfinite(energies[u]) || energies[u] < 0.0f) allFiniteAndNonNegative = false;
+        sumImpulseEnergy += energies[u];
+    }
+    reportTest("Modenenergien nach Impuls positiv und endlich", allFiniteAndNonNegative && sumImpulseEnergy > 1e-6f,
+               "Summe: " + std::to_string(sumImpulseEnergy));
+
+    // Pointer-Array im Speicher stimmt mit get_mode_energies ueberein
+    bool ptrMatch = true;
+    for (size_t u = 0; u < 16; ++u) {
+        if (std::abs(ePtr[u] - energies[u]) > 1e-6f) ptrMatch = false;
+    }
+    reportTest("Mode-Energies Pointer zeigt auf aktuelle Werte", ptrMatch);
+
+    // Einzelmoden-Getter hqrn_get_mode_energy
+    bool singleMatch = true;
+    for (size_t u = 0; u < 16; ++u) {
+        if (std::abs(hqrn_get_mode_energy(handle, u) - energies[u]) > 1e-6f) singleMatch = false;
+    }
+    reportTest("Einzelmoden-Getter hqrn_get_mode_energy konsistent", singleMatch);
+
+    // Telemetrie: g_rad und dS
+    float grad = hqrn_get_grad(handle);
+    reportTest("g_rad ist positiv und endlich", std::isfinite(grad) && grad > 0.0f,
+               "g_rad = " + std::to_string(grad));
+
+    float dS = hqrn_get_source_listener_distance(handle);
+    reportTest("d_S (Abstand Quelle-Hoerer) berechnet", std::isfinite(dS) && dS >= 0.0f,
+               "d_S = " + std::to_string(dS));
+
+    // Kopplungswinkel aendern (direkt und smoothed)
+    hqrn_set_coupling_phase(handle, 0.5f);
+    reportTest("hqrn_set_coupling_phase aendert Winkel", std::abs(hqrn_get_coupling_phase(handle) - 0.5f) < 1e-5f);
+    reportTest("hqrn_get_coupling_theta Alias funktioniert", std::abs(hqrn_get_coupling_theta(handle) - 0.5f) < 1e-5f);
+
+    hqrn_set_coupling_phase_target(handle, 1.2f, 0.05f);
+    for (int i = 0; i < 60; ++i) {
+        hqrn_process(handle, 128);
+    }
+    reportTest("hqrn_set_coupling_phase_target konvergiert", std::abs(hqrn_get_coupling_phase(handle) - 1.2f) < 1e-3f);
+
+    // Allokationsfreiheit beim Auslesen von Modenenergien
+    g_allocationCount = 0;
+    g_trackAllocations = true;
+    for (int i = 0; i < 100; ++i) {
+        hqrn_get_mode_energies(handle, energies.data());
+        volatile float e0 = hqrn_get_mode_energy(handle, 0);
+        (void)e0;
+        volatile float g = hqrn_get_grad(handle);
+        (void)g;
+    }
+    g_trackAllocations = false;
+    reportTest("0 Heap-Allokationen beim Abfragen von Modenenergien/Telemetrie", g_allocationCount == 0);
+
+    hqrn_destroy(handle);
+}
+
 int main() {
     std::cout << "========================================================\n";
     std::cout << "HQRN C-Bridge & WebAssembly Interface Test Suite\n";
@@ -281,6 +368,7 @@ int main() {
     testPoincareGeometryExport();
     testLatencyAndAdapterModes();
     testRealTimeZeroAllocations();
+    testCouplingAndModeEnergies();
 
     std::cout << "\n--------------------------------------------------------\n";
     std::cout << "Gesamtergebnis: " << g_testsPassed << " bestanden, "
